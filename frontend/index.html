@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Kubex Webhook Routine</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; color: #1a1a1a; }
+    h1 { font-size: 1.4rem; }
+    label { display: block; margin-top: 16px; font-weight: 600; }
+    input, textarea { width: 100%; padding: 8px; margin-top: 4px; box-sizing: border-box; font-size: 1rem; }
+    textarea { min-height: 100px; }
+    button { margin-top: 16px; padding: 10px 16px; font-size: 1rem; cursor: pointer; }
+    .banner { margin-top: 12px; padding: 8px 12px; border-radius: 4px; }
+    .banner.success { background: #e6f4ea; color: #1e7e34; }
+    .banner.error { background: #fce8e6; color: #c5221f; }
+    .hint { color: #666; font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <h1>Kubex Webhook Routine</h1>
+  <p class="hint">Configure a webhook URL and send it messages on demand.</p>
+
+  <label>
+    API base URL
+    <input id="apiBaseUrl" type="url" value="http://localhost:5000" />
+  </label>
+
+  <label>
+    API key
+    <input id="apiKey" type="password" placeholder="X-Api-Key value" />
+  </label>
+
+  <hr />
+
+  <form id="urlForm">
+    <label>
+      Webhook URL
+      <input id="webhookUrl" type="url" placeholder="https://example.com/webhook" required />
+    </label>
+    <button type="submit">Save URL</button>
+  </form>
+  <div id="urlBanner"></div>
+  <p id="urlUpdatedAt" class="hint"></p>
+
+  <form id="sendForm">
+    <label>
+      Message
+      <textarea id="message" placeholder="Message to send" required></textarea>
+    </label>
+    <button type="submit">Send Message</button>
+  </form>
+  <div id="sendBanner"></div>
+
+  <script>
+    const apiBaseUrlInput = document.getElementById("apiBaseUrl");
+    const apiKeyInput = document.getElementById("apiKey");
+    const webhookUrlInput = document.getElementById("webhookUrl");
+    const messageInput = document.getElementById("message");
+    const urlBanner = document.getElementById("urlBanner");
+    const urlUpdatedAt = document.getElementById("urlUpdatedAt");
+    const sendBanner = document.getElementById("sendBanner");
+
+    function showBanner(el, text, isError) {
+      el.textContent = text;
+      el.className = "banner " + (isError ? "error" : "success");
+    }
+
+    function headers() {
+      return {
+        "Content-Type": "application/json",
+        "X-Api-Key": apiKeyInput.value,
+      };
+    }
+
+    async function loadRoutine() {
+      try {
+        const response = await fetch(`${apiBaseUrlInput.value}/api/webhook`, {
+          headers: { "X-Api-Key": apiKeyInput.value },
+        });
+        if (!response.ok) return;
+        const data = await response.json();
+        webhookUrlInput.value = data.url ?? "";
+        urlUpdatedAt.textContent = data.updatedAtUtc
+          ? `Last updated ${new Date(data.updatedAtUtc).toLocaleString()}`
+          : "";
+      } catch {
+        // Ignore; user can still fill the form manually.
+      }
+    }
+
+    document.getElementById("urlForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      try {
+        const response = await fetch(`${apiBaseUrlInput.value}/api/webhook`, {
+          method: "PUT",
+          headers: headers(),
+          body: JSON.stringify({ url: webhookUrlInput.value }),
+        });
+        const data = await response.json().catch(() => null);
+        if (!response.ok) {
+          showBanner(urlBanner, data?.message ?? "Failed to save the webhook URL.", true);
+          return;
+        }
+        showBanner(urlBanner, "Webhook URL saved.", false);
+        urlUpdatedAt.textContent = data.updatedAtUtc
+          ? `Last updated ${new Date(data.updatedAtUtc).toLocaleString()}`
+          : "";
+      } catch {
+        showBanner(urlBanner, "Failed to reach the server.", true);
+      }
+    });
+
+    document.getElementById("sendForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      try {
+        const response = await fetch(`${apiBaseUrlInput.value}/api/webhook/send`, {
+          method: "POST",
+          headers: headers(),
+          body: JSON.stringify({ message: messageInput.value }),
+        });
+        const data = await response.json().catch(() => null);
+        if (!response.ok) {
+          showBanner(sendBanner, data?.message ?? "Failed to send the message.", true);
+          return;
+        }
+        showBanner(sendBanner, "Message sent.", false);
+        messageInput.value = "";
+      } catch {
+        showBanner(sendBanner, "Failed to reach the server.", true);
+      }
+    });
+
+    apiKeyInput.addEventListener("change", loadRoutine);
+  </script>
+</body>
+</html>
