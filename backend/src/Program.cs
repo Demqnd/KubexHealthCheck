@@ -36,6 +36,7 @@ builder.Services.AddCors(options =>
 });
 
 builder.Services.Configure<ApiKeySettings>(builder.Configuration.GetSection("ApiKeySettings"));
+builder.Services.Configure<KubexApiSettings>(builder.Configuration.GetSection("KubexApiSettings"));
 
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
     ?? throw new InvalidOperationException("Connection string 'DefaultConnection' is missing.");
@@ -47,8 +48,13 @@ builder.Services.AddHttpClient("Webhook", client =>
 {
     client.Timeout = TimeSpan.FromSeconds(15);
 });
+builder.Services.AddHttpClient("KubexApi", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(30);
+});
 
 builder.Services.AddScoped<IWebhookMessageSender, WebhookMessageSender>();
+builder.Services.AddScoped<IKubexHealthCheckService, KubexHealthCheckService>();
 builder.Services.AddScoped<ApiKeyAuthFilter>();
 
 var app = builder.Build();
