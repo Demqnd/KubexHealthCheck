@@ -13,9 +13,10 @@ cd backend
 dotnet restore
 ```
 
+There's no authentication on the API — it's meant to run locally / on a trusted network only. Don't expose it to the public internet as-is.
+
 Configure `appsettings.Development.json` (or environment variables):
 
-- `ApiKeySettings:Key` — a secret value clients must send in the `X-Api-Key` header on every request.
 - `KubexApiSettings:BaseUrl` — your Kubex dashboard URL (e.g. `https://your-instance.kubex.ai`), used for the Kubex health check feature.
 - `KubexApiSettings:Username` / `KubexApiSettings:Password` — credentials for an **API-enabled** Kubex user (see Kubex's `POST /authorize` docs). Required only for `POST /api/kubexhealthcheck/run`.
 - `ClaudeApiSettings:ApiKey` — an Anthropic API key. Optional: if set, `POST /api/kubexhealthcheck/run` sends the raw cluster data to Claude for an AI-written summary instead of the plain formatted one. If unset (or the call fails), it falls back to the deterministic summary automatically.
@@ -30,8 +31,6 @@ dotnet run
 
 ### API
 
-All endpoints require an `X-Api-Key` header matching `ApiKeySettings:Key`.
-
 - `GET /api/webhook` — returns the currently configured webhook URL.
 - `PUT /api/webhook` — body `{ "url": "https://..." }`, saves the webhook URL.
 - `POST /api/webhook/send` — body `{ "message": "..." }`, sends the message to the configured webhook.
@@ -39,4 +38,4 @@ All endpoints require an `X-Api-Key` header matching `ApiKeySettings:Key`.
 
 ## Frontend
 
-`frontend/index.html` is a single static page (no build step) — open it directly in a browser, or serve it with any static file server. Fill in the API base URL and API key, then use it to save the webhook URL and send messages.
+`frontend/index.html` is a single static page (no build step) — open it directly in a browser, or serve it with any static file server. Fill in the API base URL, then use it to save the webhook URL and send messages.

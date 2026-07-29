@@ -1,27 +1,11 @@
 using KubexHealthCheck.Config;
-using KubexHealthCheck.Filters;
 using KubexHealthCheck.Services;
-using Microsoft.OpenApi;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen(options =>
-{
-    options.AddSecurityDefinition("ApiKey", new OpenApiSecurityScheme
-    {
-        Name = "X-Api-Key",
-        Type = SecuritySchemeType.ApiKey,
-        In = ParameterLocation.Header,
-        Description = "API key configured in ApiKeySettings:Key"
-    });
-
-    options.AddSecurityRequirement(document => new OpenApiSecurityRequirement
-    {
-        [new OpenApiSecuritySchemeReference("ApiKey", document, null)] = new List<string>()
-    });
-});
+builder.Services.AddSwaggerGen();
 
 builder.Services.AddCors(options =>
 {
@@ -33,7 +17,6 @@ builder.Services.AddCors(options =>
     });
 });
 
-builder.Services.Configure<ApiKeySettings>(builder.Configuration.GetSection("ApiKeySettings"));
 builder.Services.Configure<KubexApiSettings>(builder.Configuration.GetSection("KubexApiSettings"));
 builder.Services.Configure<ClaudeApiSettings>(builder.Configuration.GetSection("ClaudeApiSettings"));
 
@@ -54,7 +37,6 @@ builder.Services.AddSingleton<IWebhookRoutineStore, JsonFileWebhookRoutineStore>
 builder.Services.AddScoped<IWebhookMessageSender, WebhookMessageSender>();
 builder.Services.AddScoped<IKubexHealthCheckService, KubexHealthCheckService>();
 builder.Services.AddScoped<IClaudeSummaryService, ClaudeSummaryService>();
-builder.Services.AddScoped<ApiKeyAuthFilter>();
 
 var app = builder.Build();
 

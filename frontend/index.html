@@ -26,11 +26,6 @@
     <input id="apiBaseUrl" type="url" value="http://localhost:5000" />
   </label>
 
-  <label>
-    API key
-    <input id="apiKey" type="password" placeholder="X-Api-Key value" />
-  </label>
-
   <hr />
 
   <form id="urlForm">
@@ -61,7 +56,6 @@
 
   <script>
     const apiBaseUrlInput = document.getElementById("apiBaseUrl");
-    const apiKeyInput = document.getElementById("apiKey");
     const webhookUrlInput = document.getElementById("webhookUrl");
     const messageInput = document.getElementById("message");
     const urlBanner = document.getElementById("urlBanner");
@@ -74,17 +68,12 @@
     }
 
     function headers() {
-      return {
-        "Content-Type": "application/json",
-        "X-Api-Key": apiKeyInput.value,
-      };
+      return { "Content-Type": "application/json" };
     }
 
     async function loadRoutine() {
       try {
-        const response = await fetch(`${apiBaseUrlInput.value}/api/webhook`, {
-          headers: { "X-Api-Key": apiKeyInput.value },
-        });
+        const response = await fetch(`${apiBaseUrlInput.value}/api/webhook`);
         if (!response.ok) return;
         const data = await response.json();
         webhookUrlInput.value = data.url ?? "";
@@ -138,8 +127,6 @@
       }
     });
 
-    apiKeyInput.addEventListener("change", loadRoutine);
-
     const healthCheckButton = document.getElementById("healthCheckButton");
     const healthCheckBanner = document.getElementById("healthCheckBanner");
     const healthCheckSummary = document.getElementById("healthCheckSummary");
@@ -168,6 +155,8 @@
         healthCheckButton.textContent = "Run Kubex Health Check & Post to Teams";
       }
     });
+
+    loadRoutine();
   </script>
 </body>
 </html>
