@@ -40,3 +40,15 @@ dotnet run
 ## Frontend
 
 `frontend/index.html` is a single static page (no build step) — open it directly in a browser, or serve it with any static file server. Fill in the API base URL, then use it to save the webhook URL, send messages, run the Kubex health check, or ask Claude a one-off question (pasting your own Anthropic API key into that form).
+
+## Scheduled health checks (GitHub Actions)
+
+`.github/workflows/kubex-health-check.yml` runs the health check on a cron schedule (daily by default — edit the `cron:` line to change it) without needing any server or computer left running. Each run: checks out the repo, builds and starts the backend in the Actions runner, configures the webhook URL, calls `POST /api/kubexhealthcheck/run`, then tears everything down.
+
+Add these as **repository secrets** (GitHub repo → Settings → Secrets and variables → Actions → New repository secret):
+
+- `KUBEX_BASE_URL`, `KUBEX_USERNAME`, `KUBEX_PASSWORD` — same as `KubexApiSettings` locally
+- `CLAUDE_API_KEY` — optional, for the AI-written summary
+- `TEAMS_WEBHOOK_URL` — your Teams webhook URL
+
+You can trigger it on demand from the repo's **Actions** tab (it has `workflow_dispatch` enabled) instead of waiting for the schedule, to test it right after setting up secrets.

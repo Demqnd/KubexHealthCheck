@@ -1,0 +1,65 @@
+name: Kubex Health Check
+
+on:
+  schedule:
+    - cron: "0 13 * * *" # 9am US Eastern (adjust as needed) — runs daily
+  workflow_dispatch: {} # lets you trigger it manually from the Actions tab, no waiting for the schedule
+
+jobs:
+  health-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Build backend
+        working-directory: backend
+        run: dotnet build --configuration Release
+
+      - name: Start backend
+        working-directory: backend
+        env:
+          ASPNETCORE_URLS: http://localhost:5000
+          ASPNETCORE_ENVIRONMENT: Production
+          KubexApiSettings__BaseUrl: ${{ secrets.KUBEX_BASE_URL }}
+          KubexApiSettings__Username: ${{ secrets.KUBEX_USERNAME }}
+          KubexApiSettings__Password: ${{ secrets.KUBEX_PASSWORD }}
+          ClaudeApiSettings__ApiKey: ${{ secrets.CLAUDE_API_KEY }}
+        run: |
+          nohup dotnet run --configuration Release --no-build > backend.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:5000/api/webhook > /dev/null; then
+              echo "Backend is up"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Backend did not start in time"
+          cat backend.log
+          exit 1
+
+      - name: Configure webhook URL
+        run: |
+          curl -sf -X PUT http://localhost:5000/api/webhook \
+            -H "Content-Type: application/json" \
+            -d "{\"url\": \"${{ secrets.TEAMS_WEBHOOK_URL }}\"}"
+
+      - name: Run health check
+        run: |
+          status=$(curl -sS -o response.json -w "%{http_code}" -X POST http://localhost:5000/api/kubexhealthcheck/run)
+          echo "Response body:"
+          cat response.json
+          if [ "$status" -ge 400 ]; then
+            echo "Health check failed with HTTP $status"
+            exit 1
+          fi
+
+      - name: Upload backend logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-log
+          path: backend/backend.log
