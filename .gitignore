@@ -3,3 +3,4 @@ obj/
 *.user
 .vs/
 appsettings.*.local.json
+backend/data/

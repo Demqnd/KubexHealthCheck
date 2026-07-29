@@ -4,7 +4,7 @@ A standalone webhook routine service: configure a webhook URL and send it messag
 
 ## Backend
 
-ASP.NET Core Web API (`backend/`), .NET 10, PostgreSQL via EF Core.
+ASP.NET Core Web API (`backend/`), .NET 10. No database — the webhook URL is persisted to a small JSON file (`backend/data/webhook-routine.json`, gitignored) next to the project, so there's nothing to install or run besides the .NET SDK.
 
 Setup:
 
@@ -15,18 +15,16 @@ dotnet restore
 
 Configure `appsettings.Development.json` (or environment variables):
 
-- `ConnectionStrings:DefaultConnection` — Postgres connection string.
 - `ApiKeySettings:Key` — a secret value clients must send in the `X-Api-Key` header on every request.
 - `KubexApiSettings:BaseUrl` — your Kubex dashboard URL (e.g. `https://your-instance.kubex.ai`), used for the Kubex health check feature.
 - `KubexApiSettings:Username` / `KubexApiSettings:Password` — credentials for an **API-enabled** Kubex user (see Kubex's `POST /authorize` docs). Required only for `POST /api/kubexhealthcheck/run`.
+- `DataDirectory` (optional) — where to store `webhook-routine.json`. Defaults to a `data/` folder next to the project.
 
 Run:
 
 ```bash
 dotnet run
 ```
-
-On startup it creates the `webhook_routines` table if it doesn't exist.
 
 ### API
 

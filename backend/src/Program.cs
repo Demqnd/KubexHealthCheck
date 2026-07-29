@@ -1,8 +1,6 @@
 using KubexHealthCheck.Config;
-using KubexHealthCheck.Data;
 using KubexHealthCheck.Filters;
 using KubexHealthCheck.Services;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -38,12 +36,6 @@ builder.Services.AddCors(options =>
 builder.Services.Configure<ApiKeySettings>(builder.Configuration.GetSection("ApiKeySettings"));
 builder.Services.Configure<KubexApiSettings>(builder.Configuration.GetSection("KubexApiSettings"));
 
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
-    ?? throw new InvalidOperationException("Connection string 'DefaultConnection' is missing.");
-
-builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseNpgsql(connectionString));
-
 builder.Services.AddHttpClient("Webhook", client =>
 {
     client.Timeout = TimeSpan.FromSeconds(15);
@@ -53,24 +45,12 @@ builder.Services.AddHttpClient("KubexApi", client =>
     client.Timeout = TimeSpan.FromSeconds(30);
 });
 
+builder.Services.AddSingleton<IWebhookRoutineStore, JsonFileWebhookRoutineStore>();
 builder.Services.AddScoped<IWebhookMessageSender, WebhookMessageSender>();
 builder.Services.AddScoped<IKubexHealthCheckService, KubexHealthCheckService>();
 builder.Services.AddScoped<ApiKeyAuthFilter>();
 
 var app = builder.Build();
-
-using (var scope = app.Services.CreateScope())
-{
-    var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    await dbContext.Database.EnsureCreatedAsync();
-    await dbContext.Database.ExecuteSqlRawAsync(@"
-        CREATE TABLE IF NOT EXISTS webhook_routines (
-            ""Id"" SERIAL PRIMARY KEY,
-            ""Url"" character varying(2048) NOT NULL,
-            ""UpdatedAtUtc"" timestamp with time zone NOT NULL DEFAULT NOW()
-        );
-    ");
-}
 
 app.UseSwagger();
 app.UseSwaggerUI();
