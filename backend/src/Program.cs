@@ -11,7 +11,9 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
     {
-        policy.WithOrigins("http://localhost:3000", "http://localhost:8080")
+        // The frontend is a static file opened directly (file://), which sends
+        // Origin: null — so any-origin is required rather than an allowlist.
+        policy.AllowAnyOrigin()
             .AllowAnyMethod()
             .AllowAnyHeader();
     });
