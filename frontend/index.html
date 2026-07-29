@@ -54,6 +54,31 @@
   <div id="healthCheckBanner"></div>
   <pre id="healthCheckSummary" class="hint" style="white-space: pre-wrap;"></pre>
 
+  <hr />
+
+  <p class="hint">Ask Claude anything using your own Anthropic API key. The key is only used for this request — it's never saved or sent anywhere except directly to your local backend.</p>
+
+  <form id="askForm">
+    <label>
+      Anthropic API key
+      <input id="claudeApiKey" type="password" placeholder="sk-ant-..." required />
+    </label>
+
+    <label>
+      Question
+      <textarea id="claudeQuestion" placeholder="Ask Claude a question" required></textarea>
+    </label>
+
+    <label style="font-weight: normal; display: flex; align-items: center; gap: 8px;">
+      <input id="postAskToTeams" type="checkbox" style="width: auto; margin-top: 0;" />
+      Also post the answer to the webhook above
+    </label>
+
+    <button type="submit">Ask Claude</button>
+  </form>
+  <div id="askBanner"></div>
+  <pre id="askAnswer" class="hint" style="white-space: pre-wrap;"></pre>
+
   <script>
     const apiBaseUrlInput = document.getElementById("apiBaseUrl");
     const webhookUrlInput = document.getElementById("webhookUrl");
@@ -153,6 +178,55 @@
       } finally {
         healthCheckButton.disabled = false;
         healthCheckButton.textContent = "Run Kubex Health Check & Post to Teams";
+      }
+    });
+
+    const askForm = document.getElementById("askForm");
+    const claudeApiKeyInput = document.getElementById("claudeApiKey");
+    const claudeQuestionInput = document.getElementById("claudeQuestion");
+    const postAskToTeamsInput = document.getElementById("postAskToTeams");
+    const askBanner = document.getElementById("askBanner");
+    const askAnswer = document.getElementById("askAnswer");
+
+    askForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      askAnswer.textContent = "";
+      const submitButton = askForm.querySelector("button[type=submit]");
+      submitButton.disabled = true;
+      submitButton.textContent = "Asking...";
+
+      try {
+        const response = await fetch(`${apiBaseUrlInput.value}/api/claude/ask`, {
+          method: "POST",
+          headers: headers(),
+          body: JSON.stringify({
+            apiKey: claudeApiKeyInput.value,
+            question: claudeQuestionInput.value,
+            postToTeams: postAskToTeamsInput.checked,
+          }),
+        });
+        const data = await response.json().catch(() => null);
+        if (!response.ok) {
+          showBanner(askBanner, data?.message ?? "Claude request failed.", true);
+          return;
+        }
+
+        askAnswer.textContent = data.answer ?? "";
+
+        if (postAskToTeamsInput.checked) {
+          if (data.postedToTeams) {
+            showBanner(askBanner, "Answered and posted to Teams.", false);
+          } else {
+            showBanner(askBanner, data.postError ?? "Answered, but failed to post to Teams.", true);
+          }
+        } else {
+          showBanner(askBanner, "Answered.", false);
+        }
+      } catch {
+        showBanner(askBanner, "Failed to reach the server.", true);
+      } finally {
+        submitButton.disabled = false;
+        submitButton.textContent = "Ask Claude";
       }
     });
 

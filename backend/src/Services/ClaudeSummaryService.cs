@@ -10,15 +10,20 @@ public class ClaudeSummaryService(IHttpClientFactory httpClientFactory, IOptions
 {
     private const string ApiUrl = "https://api.anthropic.com/v1/messages";
     private const string AnthropicVersion = "2023-06-01";
+    private const string DefaultModel = "claude-opus-5";
 
-    private const string SystemPrompt =
+    private const string HealthCheckSystemPrompt =
         "You are an SRE assistant. You are given raw Kubernetes cluster health JSON collected by Kubex. " +
         "Write a short, plain-text summary suitable for posting in a Teams message. Call out any cluster " +
         "whose data collection is stale (no data in the last 24 hours), any Kubernetes version drift across " +
         "clusters, and any node or container counts that look concerning. Keep it under 200 words. Do not " +
         "use markdown formatting (no headers, bullets, or bold).";
 
-    public async Task<string> SummarizeHealthCheckAsync(string clusterDataJson, CancellationToken cancellationToken = default)
+    private const string AskSystemPrompt =
+        "You are a helpful assistant. Answer the user's question clearly and concisely, in plain text " +
+        "suitable for posting in a Teams message. Do not use markdown formatting (no headers, bullets, or bold).";
+
+    public Task<string> SummarizeHealthCheckAsync(string clusterDataJson, CancellationToken cancellationToken = default)
     {
         var settings = claudeOptions.Value;
         if (string.IsNullOrWhiteSpace(settings.ApiKey))
@@ -26,19 +31,42 @@ public class ClaudeSummaryService(IHttpClientFactory httpClientFactory, IOptions
             throw new InvalidOperationException("ClaudeApiSettings:ApiKey is not configured.");
         }
 
+        var model = string.IsNullOrWhiteSpace(settings.Model) ? DefaultModel : settings.Model;
+        return CallClaudeAsync(settings.ApiKey, model, HealthCheckSystemPrompt, clusterDataJson, cancellationToken);
+    }
+
+    public Task<string> AskAsync(string apiKey, string question, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            throw new InvalidOperationException("An Anthropic API key is required.");
+        }
+
+        var configuredModel = claudeOptions.Value.Model;
+        var model = string.IsNullOrWhiteSpace(configuredModel) ? DefaultModel : configuredModel;
+        return CallClaudeAsync(apiKey, model, AskSystemPrompt, question, cancellationToken);
+    }
+
+    private async Task<string> CallClaudeAsync(
+        string apiKey,
+        string model,
+        string systemPrompt,
+        string userContent,
+        CancellationToken cancellationToken)
+    {
         var requestBody = new JsonObject
         {
-            ["model"] = settings.Model,
+            ["model"] = model,
             ["max_tokens"] = 1024,
             ["thinking"] = new JsonObject { ["type"] = "disabled" },
             ["output_config"] = new JsonObject { ["effort"] = "low" },
-            ["system"] = SystemPrompt,
+            ["system"] = systemPrompt,
             ["messages"] = new JsonArray
             {
                 new JsonObject
                 {
                     ["role"] = "user",
-                    ["content"] = clusterDataJson
+                    ["content"] = userContent
                 }
             }
         };
@@ -48,7 +76,7 @@ public class ClaudeSummaryService(IHttpClientFactory httpClientFactory, IOptions
         {
             Content = new StringContent(requestBody.ToJsonString(), Encoding.UTF8, "application/json")
         };
-        request.Headers.Add("x-api-key", settings.ApiKey);
+        request.Headers.Add("x-api-key", apiKey);
         request.Headers.Add("anthropic-version", AnthropicVersion);
 
         using var response = await client.SendAsync(request, cancellationToken);
@@ -64,7 +92,7 @@ public class ClaudeSummaryService(IHttpClientFactory httpClientFactory, IOptions
         var stopReason = node?["stop_reason"]?.GetValue<string>();
         if (stopReason == "refusal")
         {
-            throw new InvalidOperationException("Claude declined to summarize this data.");
+            throw new InvalidOperationException("Claude declined to respond to this request.");
         }
 
         var textBlock = (node?["content"] as JsonArray)?
