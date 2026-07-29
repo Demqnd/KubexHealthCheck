@@ -9,7 +9,7 @@ namespace KubexHealthCheck.Services;
 public class KubexHealthCheckService(IHttpClientFactory httpClientFactory, IOptions<KubexApiSettings> kubexOptions)
     : IKubexHealthCheckService
 {
-    public async Task<string> RunHealthCheckAsync(CancellationToken cancellationToken = default)
+    public async Task<HealthCheckResult> RunHealthCheckAsync(CancellationToken cancellationToken = default)
     {
         var settings = kubexOptions.Value;
         if (string.IsNullOrWhiteSpace(settings.BaseUrl) ||
@@ -26,7 +26,7 @@ public class KubexHealthCheckService(IHttpClientFactory httpClientFactory, IOpti
         var token = await AuthorizeAsync(client, settings, cancellationToken);
         var clusters = await GetClustersAsync(client, token, cancellationToken);
 
-        return BuildSummary(clusters);
+        return new HealthCheckResult(BuildSummary(clusters), clusters.ToJsonString());
     }
 
     private static async Task<string> AuthorizeAsync(HttpClient client, KubexApiSettings settings, CancellationToken cancellationToken)
@@ -110,3 +110,5 @@ public class KubexHealthCheckService(IHttpClientFactory httpClientFactory, IOpti
         return string.Join("\n", lines);
     }
 }
+
+public record HealthCheckResult(string DeterministicSummary, string ClusterDataJson);

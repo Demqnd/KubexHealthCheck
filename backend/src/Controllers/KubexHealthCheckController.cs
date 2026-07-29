@@ -10,25 +10,38 @@ namespace KubexHealthCheck.Controllers;
 public class KubexHealthCheckController(
     IWebhookRoutineStore webhookRoutineStore,
     IKubexHealthCheckService kubexHealthCheckService,
+    IClaudeSummaryService claudeSummaryService,
     IWebhookMessageSender webhookMessageSender) : ControllerBase
 {
     [HttpPost("run")]
     public async Task<IActionResult> Run()
     {
-        string summary;
+        HealthCheckResult result;
         try
         {
-            summary = await kubexHealthCheckService.RunHealthCheckAsync();
+            result = await kubexHealthCheckService.RunHealthCheckAsync();
         }
         catch (Exception ex)
         {
             return StatusCode(502, new { message = $"Kubex health check failed: {ex.Message}" });
         }
 
+        var summary = result.DeterministicSummary;
+        var usedAi = false;
+        try
+        {
+            summary = await claudeSummaryService.SummarizeHealthCheckAsync(result.ClusterDataJson);
+            usedAi = true;
+        }
+        catch
+        {
+            // Fall back to the deterministic summary if Claude isn't configured or the call fails.
+        }
+
         var routine = await webhookRoutineStore.GetAsync();
         if (string.IsNullOrWhiteSpace(routine.Url))
         {
-            return BadRequest(new { message = "No webhook URL has been configured yet.", summary });
+            return BadRequest(new { message = "No webhook URL has been configured yet.", summary, usedAi });
         }
 
         try
@@ -37,9 +50,9 @@ public class KubexHealthCheckController(
         }
         catch (Exception ex)
         {
-            return StatusCode(502, new { message = $"Failed to post health check to webhook: {ex.Message}", summary });
+            return StatusCode(502, new { message = $"Failed to post health check to webhook: {ex.Message}", summary, usedAi });
         }
 
-        return Ok(new { message = "Health check posted to webhook.", summary });
+        return Ok(new { message = "Health check posted to webhook.", summary, usedAi });
     }
 }

@@ -35,6 +35,7 @@ builder.Services.AddCors(options =>
 
 builder.Services.Configure<ApiKeySettings>(builder.Configuration.GetSection("ApiKeySettings"));
 builder.Services.Configure<KubexApiSettings>(builder.Configuration.GetSection("KubexApiSettings"));
+builder.Services.Configure<ClaudeApiSettings>(builder.Configuration.GetSection("ClaudeApiSettings"));
 
 builder.Services.AddHttpClient("Webhook", client =>
 {
@@ -44,10 +45,15 @@ builder.Services.AddHttpClient("KubexApi", client =>
 {
     client.Timeout = TimeSpan.FromSeconds(30);
 });
+builder.Services.AddHttpClient("ClaudeApi", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(30);
+});
 
 builder.Services.AddSingleton<IWebhookRoutineStore, JsonFileWebhookRoutineStore>();
 builder.Services.AddScoped<IWebhookMessageSender, WebhookMessageSender>();
 builder.Services.AddScoped<IKubexHealthCheckService, KubexHealthCheckService>();
+builder.Services.AddScoped<IClaudeSummaryService, ClaudeSummaryService>();
 builder.Services.AddScoped<ApiKeyAuthFilter>();
 
 var app = builder.Build();

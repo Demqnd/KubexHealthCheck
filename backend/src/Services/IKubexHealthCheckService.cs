@@ -2,5 +2,5 @@ namespace KubexHealthCheck.Services;
 
 public interface IKubexHealthCheckService
 {
-    Task<string> RunHealthCheckAsync(CancellationToken cancellationToken = default);
+    Task<HealthCheckResult> RunHealthCheckAsync(CancellationToken cancellationToken = default);
 }
