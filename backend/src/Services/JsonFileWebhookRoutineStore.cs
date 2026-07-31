@@ -1,13 +1,19 @@
 using System.Text.Json;
+using KubexHealthCheck.Config;
+using Microsoft.Extensions.Options;
 
 namespace KubexHealthCheck.Services;
 
 public class JsonFileWebhookRoutineStore : IWebhookRoutineStore
 {
     private readonly string _filePath;
+    private readonly IOptions<WebhookSettings> _webhookOptions;
     private readonly SemaphoreSlim _lock = new(1, 1);
 
-    public JsonFileWebhookRoutineStore(IConfiguration configuration, IHostEnvironment environment)
+    public JsonFileWebhookRoutineStore(
+        IConfiguration configuration,
+        IHostEnvironment environment,
+        IOptions<WebhookSettings> webhookOptions)
     {
         var dataDirectory = configuration["DataDirectory"];
         if (string.IsNullOrWhiteSpace(dataDirectory))
@@ -17,6 +23,7 @@ public class JsonFileWebhookRoutineStore : IWebhookRoutineStore
 
         Directory.CreateDirectory(dataDirectory);
         _filePath = Path.Combine(dataDirectory, "webhook-routine.json");
+        _webhookOptions = webhookOptions;
     }
 
     public async Task<WebhookRoutine> GetAsync(CancellationToken cancellationToken = default)
@@ -52,15 +59,18 @@ public class JsonFileWebhookRoutineStore : IWebhookRoutineStore
     {
         if (!File.Exists(_filePath))
         {
-            return new WebhookRoutine();
+            return DefaultRoutine();
         }
 
         var json = await File.ReadAllTextAsync(_filePath, cancellationToken);
         if (string.IsNullOrWhiteSpace(json))
         {
-            return new WebhookRoutine();
+            return DefaultRoutine();
         }
 
-        return JsonSerializer.Deserialize<WebhookRoutine>(json) ?? new WebhookRoutine();
+        var routine = JsonSerializer.Deserialize<WebhookRoutine>(json) ?? new WebhookRoutine();
+        return string.IsNullOrWhiteSpace(routine.Url) ? DefaultRoutine() : routine;
     }
+
+    private WebhookRoutine DefaultRoutine() => new() { Url = _webhookOptions.Value.DefaultUrl };
 }

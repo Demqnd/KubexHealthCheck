@@ -38,6 +38,7 @@ builder.Services.AddCors(options =>
 builder.Services.Configure<ApiKeySettings>(builder.Configuration.GetSection("ApiKeySettings"));
 builder.Services.Configure<KubexApiSettings>(builder.Configuration.GetSection("KubexApiSettings"));
 builder.Services.Configure<ClaudeApiSettings>(builder.Configuration.GetSection("ClaudeApiSettings"));
+builder.Services.Configure<WebhookSettings>(builder.Configuration.GetSection("WebhookSettings"));
 
 builder.Services.AddHttpClient("Webhook", client =>
 {
