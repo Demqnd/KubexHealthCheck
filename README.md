@@ -37,9 +37,18 @@ dotnet run
 - `POST /api/webhook/send` — body `{ "message": "..." }`, sends the message to the configured webhook.
 - `POST /api/kubexhealthcheck/run` — authenticates against the Kubex REST API (`KubexApiSettings`), fetches cluster health via `GET /kubernetes/clusters`, and posts a summary to the configured webhook. If `ClaudeApiSettings:ApiKey` is set, the summary is AI-written (Claude reads the raw cluster JSON and writes a short plain-text summary); otherwise — or if the Claude call fails — it falls back to a deterministic summary (node/container counts, Kubernetes version, data freshness per cluster). The response body's `usedAi` field tells you which one was used. Requires `KubexApiSettings` to be fully configured; returns `502` with a descriptive message otherwise.
 - `POST /api/claude/ask` — body `{ "apiKey": "sk-ant-...", "question": "...", "postToTeams": true|false }`. Sends the question straight to Claude using the API key **you pass in the request** (not `ClaudeApiSettings` — this endpoint is for ad-hoc testing without touching config at all). If `postToTeams` is true, also posts the answer to the configured webhook. The key is used only for that one call and never persisted.
-- `POST /api/claude/command` — body `{ "command": "..." }`. The bot-facing endpoint: send whatever a Teams/bot user typed, get back Claude's response. Unlike `/ask`, this uses the server-configured `ClaudeApiSettings:ApiKey`, not one passed in the request — it's meant to be called by an integration (e.g. an Azure Bot / Teams bot) that only knows the shared `X-Api-Key`, not an Anthropic key.
+- `POST /api/claude/command` — body `{ "command": "..." }`. The bot-facing endpoint: send whatever a Teams/bot user typed, get back Claude's response. Unlike `/ask`, this uses the server-configured `ClaudeApiSettings:ApiKey`, not one passed in the request — it's meant to be called by an integration (e.g. a Power Automate flow) that only knows the shared `X-Api-Key`, not an Anthropic key. It **always** also posts the response to the configured webhook (same one used by `/api/webhook/send`), so a caller doesn't need any separate "post back to Teams" step. Response body: `{ response, postedToTeams, postError }` — `response` is always populated (or the call itself returns `502` if Claude failed); `postedToTeams`/`postError` report whether the webhook post succeeded.
 
 All endpoints above require the `X-Api-Key` header described in Setup.
+
+### Two-way Teams bot (Power Automate)
+
+To let someone type a message in Teams and get a Claude-generated reply back, without registering a real Azure Bot: build a Power Automate flow with
+
+1. A trigger that fires on a Teams message (e.g. "When a keyword is mentioned" or "When a new channel message is added")
+2. A single **HTTP** action: `POST https://<your-public-host>/api/claude/command`, header `X-Api-Key: <shared secret>`, body `{ "command": "<the message text>" }`
+
+That's it — no third action needed, since the backend itself posts the answer back into the same Teams channel via the webhook. Note that Power Automate's HTTP action is a **Premium** connector, so your M365 tenant needs Power Automate Premium (or a per-user/per-flow license) for this to work.
 
 ## Frontend
 

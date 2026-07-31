@@ -86,7 +86,7 @@
 
   <hr />
 
-  <p class="hint">Test the bot-facing endpoint (<code>POST /api/claude/command</code>) — the same call a Teams bot would make. Uses the server's configured Claude key, not one typed here.</p>
+  <p class="hint">Test the bot-facing endpoint (<code>POST /api/claude/command</code>) — the same call a Teams bot would make. Uses the server's configured Claude key, not one typed here, and always posts the response to the webhook above too.</p>
 
   <form id="commandForm">
     <label>
@@ -279,7 +279,11 @@
           return;
         }
         commandResponse.textContent = data.response ?? "";
-        showBanner(commandBanner, "Done.", false);
+        if (data.postedToTeams) {
+          showBanner(commandBanner, "Sent — also posted to Teams.", false);
+        } else {
+          showBanner(commandBanner, data.postError ?? "Answered, but failed to post to Teams.", true);
+        }
       } catch {
         showBanner(commandBanner, "Failed to reach the server.", true);
       } finally {

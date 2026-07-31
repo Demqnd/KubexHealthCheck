@@ -22,15 +22,38 @@ public class ClaudeController(
             return BadRequest(new { message = "A command is required." });
         }
 
+        string response;
         try
         {
-            var response = await claudeSummaryService.RunCommandAsync(command);
-            return Ok(new { response });
+            response = await claudeSummaryService.RunCommandAsync(command);
         }
         catch (Exception ex)
         {
             return StatusCode(502, new { message = $"Claude request failed: {ex.Message}" });
         }
+
+        var postedToTeams = false;
+        string? postError = null;
+
+        var routine = await webhookRoutineStore.GetAsync();
+        if (string.IsNullOrWhiteSpace(routine.Url))
+        {
+            postError = "No webhook URL has been configured yet.";
+        }
+        else
+        {
+            try
+            {
+                await webhookMessageSender.SendAsync(routine.Url, response);
+                postedToTeams = true;
+            }
+            catch (Exception ex)
+            {
+                postError = $"Failed to post to webhook: {ex.Message}";
+            }
+        }
+
+        return Ok(new { response, postedToTeams, postError });
     }
 
     [HttpPost("ask")]
