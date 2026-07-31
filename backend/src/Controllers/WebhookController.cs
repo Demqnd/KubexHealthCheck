@@ -1,4 +1,5 @@
 using KubexHealthCheck.Contracts;
+using KubexHealthCheck.Filters;
 using KubexHealthCheck.Services;
 using Microsoft.AspNetCore.Mvc;
 
@@ -6,6 +7,7 @@ namespace KubexHealthCheck.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[ServiceFilter(typeof(ApiKeyAuthFilter))]
 public class WebhookController(IWebhookRoutineStore webhookRoutineStore, IWebhookMessageSender webhookMessageSender) : ControllerBase
 {
     [HttpGet]

@@ -24,6 +24,7 @@ jobs:
         env:
           ASPNETCORE_URLS: http://localhost:5000
           ASPNETCORE_ENVIRONMENT: Production
+          ApiKeySettings__Key: ${{ secrets.API_KEY }}
           KubexApiSettings__BaseUrl: ${{ secrets.KUBEX_BASE_URL }}
           KubexApiSettings__Username: ${{ secrets.KUBEX_USERNAME }}
           KubexApiSettings__Password: ${{ secrets.KUBEX_PASSWORD }}
@@ -31,7 +32,7 @@ jobs:
         run: |
           nohup dotnet run --configuration Release --no-build > backend.log 2>&1 &
           for i in $(seq 1 30); do
-            if curl -sf http://localhost:5000/api/webhook > /dev/null; then
+            if curl -sf -H "X-Api-Key: ${{ secrets.API_KEY }}" http://localhost:5000/api/webhook > /dev/null; then
               echo "Backend is up"
               exit 0
             fi
@@ -45,11 +46,13 @@ jobs:
         run: |
           curl -sf -X PUT http://localhost:5000/api/webhook \
             -H "Content-Type: application/json" \
+            -H "X-Api-Key: ${{ secrets.API_KEY }}" \
             -d "{\"url\": \"${{ secrets.TEAMS_WEBHOOK_URL }}\"}"
 
       - name: Run health check
         run: |
-          status=$(curl -sS -o response.json -w "%{http_code}" -X POST http://localhost:5000/api/kubexhealthcheck/run)
+          status=$(curl -sS -o response.json -w "%{http_code}" -X POST http://localhost:5000/api/kubexhealthcheck/run \
+            -H "X-Api-Key: ${{ secrets.API_KEY }}")
           echo "Response body:"
           cat response.json
           if [ "$status" -ge 400 ]; then

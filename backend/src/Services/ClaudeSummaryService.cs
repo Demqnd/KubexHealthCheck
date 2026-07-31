@@ -47,6 +47,18 @@ public class ClaudeSummaryService(IHttpClientFactory httpClientFactory, IOptions
         return CallClaudeAsync(apiKey, model, AskSystemPrompt, question, cancellationToken);
     }
 
+    public Task<string> RunCommandAsync(string command, CancellationToken cancellationToken = default)
+    {
+        var settings = claudeOptions.Value;
+        if (string.IsNullOrWhiteSpace(settings.ApiKey))
+        {
+            throw new InvalidOperationException("ClaudeApiSettings:ApiKey is not configured.");
+        }
+
+        var model = string.IsNullOrWhiteSpace(settings.Model) ? DefaultModel : settings.Model;
+        return CallClaudeAsync(settings.ApiKey, model, AskSystemPrompt, command, cancellationToken);
+    }
+
     private async Task<string> CallClaudeAsync(
         string apiKey,
         string model,

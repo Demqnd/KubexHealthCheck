@@ -1,4 +1,5 @@
 using KubexHealthCheck.Contracts;
+using KubexHealthCheck.Filters;
 using KubexHealthCheck.Services;
 using Microsoft.AspNetCore.Mvc;
 
@@ -6,11 +7,32 @@ namespace KubexHealthCheck.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[ServiceFilter(typeof(ApiKeyAuthFilter))]
 public class ClaudeController(
     IClaudeSummaryService claudeSummaryService,
     IWebhookRoutineStore webhookRoutineStore,
     IWebhookMessageSender webhookMessageSender) : ControllerBase
 {
+    [HttpPost("command")]
+    public async Task<IActionResult> Command(ClaudeCommandRequest request)
+    {
+        var command = request.Command?.Trim();
+        if (string.IsNullOrWhiteSpace(command))
+        {
+            return BadRequest(new { message = "A command is required." });
+        }
+
+        try
+        {
+            var response = await claudeSummaryService.RunCommandAsync(command);
+            return Ok(new { response });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(502, new { message = $"Claude request failed: {ex.Message}" });
+        }
+    }
+
     [HttpPost("ask")]
     public async Task<IActionResult> Ask(AskClaudeRequest request)
     {

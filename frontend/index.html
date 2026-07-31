@@ -26,6 +26,11 @@
     <input id="apiBaseUrl" type="url" value="http://localhost:5000" />
   </label>
 
+  <label>
+    API key
+    <input id="apiKey" type="password" placeholder="X-Api-Key value" />
+  </label>
+
   <hr />
 
   <form id="urlForm">
@@ -79,8 +84,23 @@
   <div id="askBanner"></div>
   <pre id="askAnswer" class="hint" style="white-space: pre-wrap;"></pre>
 
+  <hr />
+
+  <p class="hint">Test the bot-facing endpoint (<code>POST /api/claude/command</code>) — the same call a Teams bot would make. Uses the server's configured Claude key, not one typed here.</p>
+
+  <form id="commandForm">
+    <label>
+      Command
+      <textarea id="commandText" placeholder="What a bot user typed" required></textarea>
+    </label>
+    <button type="submit">Send Command</button>
+  </form>
+  <div id="commandBanner"></div>
+  <pre id="commandResponse" class="hint" style="white-space: pre-wrap;"></pre>
+
   <script>
     const apiBaseUrlInput = document.getElementById("apiBaseUrl");
+    const apiKeyInput = document.getElementById("apiKey");
     const webhookUrlInput = document.getElementById("webhookUrl");
     const messageInput = document.getElementById("message");
     const urlBanner = document.getElementById("urlBanner");
@@ -93,12 +113,17 @@
     }
 
     function headers() {
-      return { "Content-Type": "application/json" };
+      return {
+        "Content-Type": "application/json",
+        "X-Api-Key": apiKeyInput.value,
+      };
     }
 
     async function loadRoutine() {
       try {
-        const response = await fetch(`${apiBaseUrlInput.value}/api/webhook`);
+        const response = await fetch(`${apiBaseUrlInput.value}/api/webhook`, {
+          headers: { "X-Api-Key": apiKeyInput.value },
+        });
         if (!response.ok) return;
         const data = await response.json();
         webhookUrlInput.value = data.url ?? "";
@@ -230,6 +255,40 @@
       }
     });
 
+    const commandForm = document.getElementById("commandForm");
+    const commandTextInput = document.getElementById("commandText");
+    const commandBanner = document.getElementById("commandBanner");
+    const commandResponse = document.getElementById("commandResponse");
+
+    commandForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      commandResponse.textContent = "";
+      const submitButton = commandForm.querySelector("button[type=submit]");
+      submitButton.disabled = true;
+      submitButton.textContent = "Sending...";
+
+      try {
+        const response = await fetch(`${apiBaseUrlInput.value}/api/claude/command`, {
+          method: "POST",
+          headers: headers(),
+          body: JSON.stringify({ command: commandTextInput.value }),
+        });
+        const data = await response.json().catch(() => null);
+        if (!response.ok) {
+          showBanner(commandBanner, data?.message ?? "Command failed.", true);
+          return;
+        }
+        commandResponse.textContent = data.response ?? "";
+        showBanner(commandBanner, "Done.", false);
+      } catch {
+        showBanner(commandBanner, "Failed to reach the server.", true);
+      } finally {
+        submitButton.disabled = false;
+        submitButton.textContent = "Send Command";
+      }
+    });
+
+    apiKeyInput.addEventListener("change", loadRoutine);
     loadRoutine();
   </script>
 </body>
