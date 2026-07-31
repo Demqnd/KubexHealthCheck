@@ -1,4 +1,4 @@
-name: Kubex Health Check
+name: Good Morning Message
 
 on:
   schedule:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch: {} # lets you trigger it manually from the Actions tab, no waiting for the schedule
 
 jobs:
-  health-check:
+  good-morning:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,10 +25,6 @@ jobs:
           ASPNETCORE_URLS: http://localhost:5000
           ASPNETCORE_ENVIRONMENT: Production
           ApiKeySettings__Key: ${{ secrets.API_KEY }}
-          KubexApiSettings__BaseUrl: ${{ secrets.KUBEX_BASE_URL }}
-          KubexApiSettings__Username: ${{ secrets.KUBEX_USERNAME }}
-          KubexApiSettings__Password: ${{ secrets.KUBEX_PASSWORD }}
-          ClaudeApiSettings__ApiKey: ${{ secrets.CLAUDE_API_KEY }}
         run: |
           nohup dotnet run --configuration Release --no-build > backend.log 2>&1 &
           for i in $(seq 1 30); do
@@ -49,14 +45,16 @@ jobs:
             -H "X-Api-Key: ${{ secrets.API_KEY }}" \
             -d "{\"url\": \"${{ secrets.TEAMS_WEBHOOK_URL }}\"}"
 
-      - name: Run health check
+      - name: Send good morning message
         run: |
-          status=$(curl -sS -o response.json -w "%{http_code}" -X POST http://localhost:5000/api/kubexhealthcheck/run \
-            -H "X-Api-Key: ${{ secrets.API_KEY }}")
+          status=$(curl -sS -o response.json -w "%{http_code}" -X POST http://localhost:5000/api/webhook/send \
+            -H "Content-Type: application/json" \
+            -H "X-Api-Key: ${{ secrets.API_KEY }}" \
+            -d '{"message": "Good morning!"}')
           echo "Response body:"
           cat response.json
           if [ "$status" -ge 400 ]; then
-            echo "Health check failed with HTTP $status"
+            echo "Send failed with HTTP $status"
             exit 1
           fi
 
