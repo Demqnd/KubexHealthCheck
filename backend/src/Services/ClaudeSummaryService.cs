@@ -31,6 +31,31 @@ public class ClaudeSummaryService(
         "You are a helpful assistant. Answer the user's question clearly and concisely, in plain text " +
         "suitable for posting in a Teams message. Do not use markdown formatting (no headers, bullets, or bold).";
 
+    // Adapted from the "Kubex Health Check" Claude Code skill (see skills/kubex-health-check/SKILL.md)
+    // for use over the raw Messages API: no connector-name resolution (the MCP URL is already given
+    // explicitly) and no local file write (the answer is posted to Teams by this service instead).
+    private const string KubexMcpSystemPrompt =
+        "You are an SRE assistant with access to a connected Kubex MCP server's tools. When asked about " +
+        "cluster health, call the Kubex cluster-connections tool to get per-cluster data: clusterName, " +
+        "status, lastDataCollectionTime, forwarderVersion, prometheusVersion, kubernetesVersion, nodeCount, " +
+        "containerCount. Each entry is one cluster connection. " +
+        "Produce a short plain-text summary, in this order: " +
+        "1) Cluster count - how many clusters are connected, e.g. \"14 clusters connected.\" " +
+        "2) Status check - a cluster is healthy if its status is \"Ready\" or \"Collecting\"; anything else " +
+        "needs action. If all healthy, say so in one line. If not, name the unhealthy cluster(s) and their " +
+        "status, e.g. \"2 clusters need attention: foo-cluster (Error), bar-cluster (Disconnected).\" " +
+        "3) Freshness check - compare each cluster's lastDataCollectionTime to now (default to US Eastern " +
+        "time unless told otherwise) against a 24-hour window. If all fresh, say so and include the most " +
+        "recent collection time in hours to one decimal place, e.g. \"All 14 clusters have collected data " +
+        "in the past 24 hours (most recent: 9.1h ago).\" If any are stale, name them and how stale, e.g. " +
+        "\"3 of 14 clusters haven't collected in over 24 hours: foo-cluster (last seen 31h ago).\" " +
+        "4) Version drift - for forwarderVersion and prometheusVersion separately: if uniform across all " +
+        "clusters, say so (\"all 14 clusters on forwarder v4.3.0\"); otherwise name only the oldest version " +
+        "present and how many clusters run it (\"oldest forwarder version is v4.1.0, running on 2 of 14 " +
+        "clusters\"). Don't list every version/cluster combination. " +
+        "Keep the whole summary to one tight paragraph, plain text only (no markdown, no headers, no " +
+        "bullets, no bold) - it will be posted directly as a Teams message.";
+
     public Task<string> SummarizeHealthCheckAsync(string clusterDataJson, CancellationToken cancellationToken = default)
     {
         var settings = claudeOptions.Value;
@@ -75,10 +100,11 @@ public class ClaudeSummaryService(
         var instruction = command.Remove(urlMatch.Index, urlMatch.Length).Trim();
         if (string.IsNullOrWhiteSpace(instruction))
         {
-            instruction = "Use the connected MCP server's tools to help with this request.";
+            instruction = "Check the fleet's health.";
         }
 
-        return CallClaudeAsync(settings.ApiKey, model, AskSystemPrompt, instruction, cancellationToken, mcpServerUrl);
+        return CallClaudeAsync(
+            settings.ApiKey, model, KubexMcpSystemPrompt, instruction, cancellationToken, mcpServerUrl);
     }
 
     private async Task<string> CallClaudeAsync(
@@ -92,7 +118,7 @@ public class ClaudeSummaryService(
         var requestBody = new JsonObject
         {
             ["model"] = model,
-            ["max_tokens"] = 1024,
+            ["max_tokens"] = string.IsNullOrWhiteSpace(mcpServerUrl) ? 1024 : 4096,
             ["thinking"] = new JsonObject { ["type"] = "disabled" },
             ["output_config"] = new JsonObject { ["effort"] = "low" },
             ["system"] = systemPrompt,

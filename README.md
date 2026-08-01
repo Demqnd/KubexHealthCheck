@@ -58,6 +58,8 @@ If a `command` sent to `POST /api/claude/command` contains a URL (e.g. `@KubexAI
 
 The MCP server's own auth token comes from the server-side `KubexMcpSettings:AuthorizationToken` config (not from the message) — so a bot user only ever needs to include the MCP server's URL, never a credential, in their Teams message. This keeps the token out of Teams chat history and Power Automate run logs.
 
+When an MCP URL is present, Claude is given a Kubex-fleet-health-specific system prompt (`KubexMcpSystemPrompt` in `ClaudeSummaryService.cs`) instead of the generic one — it's told to call the MCP server's cluster-connections tool and report cluster count, status, 24-hour data freshness, and forwarder/Prometheus version drift, in one clean paragraph. This is adapted from the `skills/kubex-health-check/SKILL.md` Claude Code skill (see that file for the full original logic, and for why it isn't used as-is here — Skills are a Claude Code/Claude.ai feature, not something the raw Messages API loads).
+
 ## Frontend
 
 `frontend/index.html` is a single static page (no build step) — open it directly in a browser, or serve it with any static file server. Fill in the API base URL, then use it to save the webhook URL, send messages, run the Kubex health check, or ask Claude a one-off question (pasting your own Anthropic API key into that form).
