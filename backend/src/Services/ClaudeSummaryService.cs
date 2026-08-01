@@ -1,16 +1,24 @@
 using System.Text;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using KubexHealthCheck.Config;
 using Microsoft.Extensions.Options;
 
 namespace KubexHealthCheck.Services;
 
-public class ClaudeSummaryService(IHttpClientFactory httpClientFactory, IOptions<ClaudeApiSettings> claudeOptions)
+public class ClaudeSummaryService(
+    IHttpClientFactory httpClientFactory,
+    IOptions<ClaudeApiSettings> claudeOptions,
+    IOptions<KubexMcpSettings> mcpOptions)
     : IClaudeSummaryService
 {
     private const string ApiUrl = "https://api.anthropic.com/v1/messages";
     private const string AnthropicVersion = "2023-06-01";
+    private const string McpBetaHeader = "mcp-client-2025-11-20";
     private const string DefaultModel = "claude-opus-5";
+    private const string McpServerName = "kubex-mcp";
+
+    private static readonly Regex McpUrlPattern = new(@"https?://\S+", RegexOptions.Compiled);
 
     private const string HealthCheckSystemPrompt =
         "You are an SRE assistant. You are given raw Kubernetes cluster health JSON collected by Kubex. " +
@@ -56,7 +64,21 @@ public class ClaudeSummaryService(IHttpClientFactory httpClientFactory, IOptions
         }
 
         var model = string.IsNullOrWhiteSpace(settings.Model) ? DefaultModel : settings.Model;
-        return CallClaudeAsync(settings.ApiKey, model, AskSystemPrompt, command, cancellationToken);
+
+        var urlMatch = McpUrlPattern.Match(command);
+        if (!urlMatch.Success)
+        {
+            return CallClaudeAsync(settings.ApiKey, model, AskSystemPrompt, command, cancellationToken);
+        }
+
+        var mcpServerUrl = urlMatch.Value;
+        var instruction = command.Remove(urlMatch.Index, urlMatch.Length).Trim();
+        if (string.IsNullOrWhiteSpace(instruction))
+        {
+            instruction = "Use the connected MCP server's tools to help with this request.";
+        }
+
+        return CallClaudeAsync(settings.ApiKey, model, AskSystemPrompt, instruction, cancellationToken, mcpServerUrl);
     }
 
     private async Task<string> CallClaudeAsync(
@@ -64,7 +86,8 @@ public class ClaudeSummaryService(IHttpClientFactory httpClientFactory, IOptions
         string model,
         string systemPrompt,
         string userContent,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? mcpServerUrl = null)
     {
         var requestBody = new JsonObject
         {
@@ -83,6 +106,28 @@ public class ClaudeSummaryService(IHttpClientFactory httpClientFactory, IOptions
             }
         };
 
+        if (!string.IsNullOrWhiteSpace(mcpServerUrl))
+        {
+            requestBody["mcp_servers"] = new JsonArray
+            {
+                new JsonObject
+                {
+                    ["type"] = "url",
+                    ["url"] = mcpServerUrl,
+                    ["name"] = McpServerName,
+                    ["authorization_token"] = mcpOptions.Value.AuthorizationToken
+                }
+            };
+            requestBody["tools"] = new JsonArray
+            {
+                new JsonObject
+                {
+                    ["type"] = "mcp_toolset",
+                    ["mcp_server_name"] = McpServerName
+                }
+            };
+        }
+
         var client = httpClientFactory.CreateClient("ClaudeApi");
         using var request = new HttpRequestMessage(HttpMethod.Post, ApiUrl)
         {
@@ -90,6 +135,10 @@ public class ClaudeSummaryService(IHttpClientFactory httpClientFactory, IOptions
         };
         request.Headers.Add("x-api-key", apiKey);
         request.Headers.Add("anthropic-version", AnthropicVersion);
+        if (!string.IsNullOrWhiteSpace(mcpServerUrl))
+        {
+            request.Headers.Add("anthropic-beta", McpBetaHeader);
+        }
 
         using var response = await client.SendAsync(request, cancellationToken);
         var responseJson = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -107,8 +156,11 @@ public class ClaudeSummaryService(IHttpClientFactory httpClientFactory, IOptions
             throw new InvalidOperationException("Claude declined to respond to this request.");
         }
 
+        // Take the LAST text block, not the first: when Claude uses an MCP tool,
+        // the content array can contain preamble text before the tool call and
+        // the real answer after the tool result.
         var textBlock = (node?["content"] as JsonArray)?
-            .FirstOrDefault(block => block?["type"]?.GetValue<string>() == "text");
+            .LastOrDefault(block => block?["type"]?.GetValue<string>() == "text");
 
         var text = textBlock?["text"]?.GetValue<string>();
         if (string.IsNullOrWhiteSpace(text))

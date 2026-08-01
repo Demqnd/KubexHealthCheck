@@ -23,6 +23,7 @@ Configure `appsettings.Development.json` (or environment variables):
 - `KubexApiSettings:Username` / `KubexApiSettings:Password` — credentials for an **API-enabled** Kubex user (see Kubex's `POST /authorize` docs). Required only for `POST /api/kubexhealthcheck/run`.
 - `ClaudeApiSettings:ApiKey` — an Anthropic API key. Used by `POST /api/kubexhealthcheck/run` for the AI-written summary (falls back to a deterministic summary if unset or if the call fails) and by `POST /api/claude/command` for the bot-facing command endpoint.
 - `ClaudeApiSettings:Model` — defaults to `claude-opus-5`.
+- `KubexMcpSettings:AuthorizationToken` — optional. Lets a bot command connect Claude to a Kubex MCP server for that one request — see "MCP-connected commands" below.
 - `DataDirectory` (optional) — where to store `webhook-routine.json`. Defaults to a `data/` folder next to the project.
 
 Run:
@@ -50,6 +51,12 @@ To let someone type a message in Teams and get a Claude-generated reply back, wi
 2. A single **HTTP** action: `POST https://<your-public-host>/api/claude/command`, header `X-Api-Key: <shared secret>`, body `{ "command": "<the message text>" }`
 
 That's it — no third action needed, since the backend itself posts the answer back into the same Teams channel via the webhook. Note that Power Automate's HTTP action is a **Premium** connector, so your M365 tenant needs Power Automate Premium (or a per-user/per-flow license) for this to work.
+
+### MCP-connected commands
+
+If a `command` sent to `POST /api/claude/command` contains a URL (e.g. `@KubexAI https://some-mcp-server.example.com/mcp check cluster status`), the backend automatically connects Claude to that URL as an MCP server for that one request — using the [Anthropic MCP connector](https://platform.claude.com/docs/en/agents-and-tools/mcp-connector), Claude can call tools exposed by that server before answering. The URL is stripped out of the text sent to Claude as the actual instruction.
+
+The MCP server's own auth token comes from the server-side `KubexMcpSettings:AuthorizationToken` config (not from the message) — so a bot user only ever needs to include the MCP server's URL, never a credential, in their Teams message. This keeps the token out of Teams chat history and Power Automate run logs.
 
 ## Frontend
 

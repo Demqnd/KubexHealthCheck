@@ -39,6 +39,7 @@ builder.Services.Configure<ApiKeySettings>(builder.Configuration.GetSection("Api
 builder.Services.Configure<KubexApiSettings>(builder.Configuration.GetSection("KubexApiSettings"));
 builder.Services.Configure<ClaudeApiSettings>(builder.Configuration.GetSection("ClaudeApiSettings"));
 builder.Services.Configure<WebhookSettings>(builder.Configuration.GetSection("WebhookSettings"));
+builder.Services.Configure<KubexMcpSettings>(builder.Configuration.GetSection("KubexMcpSettings"));
 
 builder.Services.AddHttpClient("Webhook", client =>
 {
