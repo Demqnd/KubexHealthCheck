@@ -5,6 +5,11 @@ using Microsoft.OpenApi;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Gitignored (see .gitignore's "appsettings.*.local.json" pattern) — put real local secrets
+// here instead of in the tracked appsettings.json / appsettings.{Environment}.json files.
+builder.Configuration.AddJsonFile(
+    $"appsettings.{builder.Environment.EnvironmentName}.local.json", optional: true, reloadOnChange: true);
+
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
