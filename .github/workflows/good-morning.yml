@@ -25,6 +25,7 @@ jobs:
           ASPNETCORE_URLS: http://localhost:5000
           ASPNETCORE_ENVIRONMENT: Production
           ApiKeySettings__Key: ${{ secrets.API_KEY }}
+          ClaudeApiSettings__ApiKey: ${{ secrets.CLAUDE_API_KEY }}
         run: |
           nohup dotnet run --configuration Release --no-build > backend.log 2>&1 &
           for i in $(seq 1 30); do
@@ -47,10 +48,10 @@ jobs:
 
       - name: Send good morning message
         run: |
-          status=$(curl -sS -o response.json -w "%{http_code}" -X POST http://localhost:5000/api/webhook/send \
+          status=$(curl -sS -o response.json -w "%{http_code}" -X POST http://localhost:5000/api/claude/command \
             -H "Content-Type: application/json" \
             -H "X-Api-Key: ${{ secrets.API_KEY }}" \
-            -d '{"message": "Good morning!"}')
+            -d '{"command": "Good morning! Tell me something new today about the news."}')
           echo "Response body:"
           cat response.json
           if [ "$status" -ge 400 ]; then

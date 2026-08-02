@@ -66,13 +66,14 @@ When an MCP URL is present, Claude is given a Kubex-fleet-health-specific system
 
 ## Scheduled message (GitHub Actions)
 
-`.github/workflows/good-morning.yml` posts a simple "Good morning!" message to your Teams webhook on a cron schedule (daily by default — edit the `cron:` line to change it), without needing any server or computer left running. Each run: checks out the repo, builds and starts the backend in the Actions runner, configures the webhook URL, calls `POST /api/webhook/send`, then tears everything down.
+`.github/workflows/good-morning.yml` asks Claude a "good morning" question and posts the answer to your Teams webhook on a cron schedule (daily by default — edit the `cron:` line to change it), without needing any server or computer left running. Each run: checks out the repo, builds and starts the backend in the Actions runner, configures the webhook URL, calls `POST /api/claude/command` with the prompt "Good morning! Tell me something new today about the news." — Claude's answer is posted to Teams automatically by that endpoint — then tears everything down.
 
-This intentionally does **not** call `/api/kubexhealthcheck/run` — that endpoint needs a fully working `KubexApiSettings` setup (Kubex base URL + API-enabled credentials), which isn't in place yet and was failing. Once Kubex auth is sorted out, swap the "Send good morning message" step back to hit `/api/kubexhealthcheck/run` (see git history for the previous version of this file) to resume real health checks.
+This intentionally does **not** call `/api/kubexhealthcheck/run` — that endpoint needs a fully working `KubexApiSettings` setup (Kubex base URL + API-enabled credentials), which isn't in place yet and was failing. Once Kubex auth is sorted out, swap the "Send good morning message" step to hit `/api/kubexhealthcheck/run` instead to resume real health checks.
 
 Add these as **repository secrets** (GitHub repo → Settings → Secrets and variables → Actions → New repository secret):
 
 - `API_KEY` — the same shared secret as `ApiKeySettings:Key`
 - `TEAMS_WEBHOOK_URL` — your Teams webhook URL
+- `CLAUDE_API_KEY` — an Anthropic API key, same as `ClaudeApiSettings:ApiKey`
 
 You can trigger it on demand from the repo's **Actions** tab (it has `workflow_dispatch` enabled) instead of waiting for the schedule, to test it right after setting up secrets.
