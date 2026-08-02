@@ -51,7 +51,7 @@ jobs:
           status=$(curl -sS -o response.json -w "%{http_code}" -X POST http://localhost:5000/api/claude/command \
             -H "Content-Type: application/json" \
             -H "X-Api-Key: ${{ secrets.API_KEY }}" \
-            -d '{"command": "Good morning! Tell me something new that most people don't know."}')
+            -d "{\"command\": \"Good morning! Tell me something new that most people don't know.\"}")
           echo "Response body:"
           cat response.json
           if [ "$status" -ge 400 ]; then
