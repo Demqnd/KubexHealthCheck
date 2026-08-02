@@ -77,3 +77,30 @@ Add these as **repository secrets** (GitHub repo → Settings → Secrets and va
 - `CLAUDE_API_KEY` — an Anthropic API key, same as `ClaudeApiSettings:ApiKey`
 
 You can trigger it on demand from the repo's **Actions** tab (it has `workflow_dispatch` enabled) instead of waiting for the schedule, to test it right after setting up secrets.
+
+### On-demand Claude command (GitHub Actions as a bot backend)
+
+`.github/workflows/claude-command.yml` is a second workflow, triggered only via `workflow_dispatch` (no schedule), that takes a `command` input and sends it to `POST /api/claude/command` — same start-backend-and-call flow as the good-morning workflow, but with whatever text you pass in instead of a fixed prompt. It's a way to run the bot without keeping any server of your own running, at the cost of roughly a minute of latency per command (checkout + build + startup) instead of an instant reply from an always-on backend.
+
+To trigger it from something like a Power Automate flow (instead of that flow calling your backend's `/api/claude/command` directly), call the GitHub API:
+
+```
+POST https://api.github.com/repos/Demqnd/KubexHealthCheck/actions/workflows/claude-command.yml/dispatches
+Authorization: Bearer <a GitHub personal access token>
+Accept: application/vnd.github+json
+Content-Type: application/json
+
+{
+  "ref": "main",
+  "inputs": {
+    "command": "<the Teams message text>"
+  }
+}
+```
+
+Notes:
+
+- The token needs `Actions: Read and write` permission on this repo — create a **fine-grained personal access token** (GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens) scoped to just this repository, rather than a classic token with broad `repo` scope.
+- This call returns `202 Accepted` immediately — it does **not** wait for the workflow to finish or return Claude's answer. The answer still only reaches Teams the same way as before: the workflow calls `/api/claude/command`, which posts the response to your configured webhook itself.
+- Each run does a full `dotnet build` from scratch (no dependency/build caching configured), so expect ~30-90 seconds between sending a command and seeing a reply in Teams.
+- Running this repeatedly is still free or near-free — GitHub Actions is unlimited on public repos, and private repos get 2,000 free minutes/month on the default plan, well beyond what casual bot usage would use.

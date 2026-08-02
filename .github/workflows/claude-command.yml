@@ -1,0 +1,73 @@
+name: Claude Command
+
+on:
+  workflow_dispatch:
+    inputs:
+      command:
+        description: "The message/command text to send to Claude"
+        required: true
+        type: string
+
+jobs:
+  run-command:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Build backend
+        working-directory: backend
+        run: dotnet build --configuration Release
+
+      - name: Start backend
+        working-directory: backend
+        env:
+          ASPNETCORE_URLS: http://localhost:5000
+          ASPNETCORE_ENVIRONMENT: Production
+          ApiKeySettings__Key: ${{ secrets.API_KEY }}
+          ClaudeApiSettings__ApiKey: ${{ secrets.CLAUDE_API_KEY }}
+        run: |
+          nohup dotnet run --configuration Release --no-build > backend.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -sf -H "X-Api-Key: ${{ secrets.API_KEY }}" http://localhost:5000/api/webhook > /dev/null; then
+              echo "Backend is up"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Backend did not start in time"
+          cat backend.log
+          exit 1
+
+      - name: Configure webhook URL
+        run: |
+          curl -sf -X PUT http://localhost:5000/api/webhook \
+            -H "Content-Type: application/json" \
+            -H "X-Api-Key: ${{ secrets.API_KEY }}" \
+            -d "{\"url\": \"${{ secrets.TEAMS_WEBHOOK_URL }}\"}"
+
+      - name: Send command to Claude
+        env:
+          COMMAND_TEXT: ${{ inputs.command }}
+        run: |
+          payload=$(jq -n --arg cmd "$COMMAND_TEXT" '{command: $cmd}')
+          status=$(curl -sS -o response.json -w "%{http_code}" -X POST http://localhost:5000/api/claude/command \
+            -H "Content-Type: application/json" \
+            -H "X-Api-Key: ${{ secrets.API_KEY }}" \
+            -d "$payload")
+          echo "Response body:"
+          cat response.json
+          if [ "$status" -ge 400 ]; then
+            echo "Send failed with HTTP $status"
+            exit 1
+          fi
+
+      - name: Upload backend logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-log
+          path: backend/backend.log
