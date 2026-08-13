@@ -134,7 +134,7 @@ public class ClaudeSummaryService(
         return CallClaudeAsync(settings.ApiKey, model, AskSystemPrompt, content, cancellationToken);
     }
 
-    private (Skill? Skill, string Rest) ResolveSkill(string content)
+    private (Skill? Skill, string Remainder) ResolveSkill(string content)
     {
         var spaceIndex = content.IndexOf(' ');
         var firstWord = spaceIndex < 0 ? content : content[..spaceIndex];
