@@ -60,6 +60,7 @@ builder.Services.AddHttpClient("ClaudeApi", client =>
 });
 
 builder.Services.AddSingleton<IWebhookRoutineStore, JsonFileWebhookRoutineStore>();
+builder.Services.AddSingleton<ISkillRegistry, SkillRegistry>();
 builder.Services.AddScoped<IWebhookMessageSender, WebhookMessageSender>();
 builder.Services.AddScoped<IKubexHealthCheckService, KubexHealthCheckService>();
 builder.Services.AddScoped<IClaudeSummaryService, ClaudeSummaryService>();

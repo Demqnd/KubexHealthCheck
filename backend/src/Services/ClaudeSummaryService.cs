@@ -9,7 +9,8 @@ namespace KubexHealthCheck.Services;
 public class ClaudeSummaryService(
     IHttpClientFactory httpClientFactory,
     IOptions<ClaudeApiSettings> claudeOptions,
-    IOptions<KubexMcpSettings> mcpOptions)
+    IOptions<KubexMcpSettings> mcpOptions,
+    ISkillRegistry skillRegistry)
     : IClaudeSummaryService
 {
     private const string ApiUrl = "https://api.anthropic.com/v1/messages";
@@ -19,6 +20,11 @@ public class ClaudeSummaryService(
     private const string McpServerName = "kubex-mcp";
 
     private static readonly Regex McpUrlPattern = new(@"https?://\S+", RegexOptions.Compiled);
+
+    // Strips a leading "@KubexAI" (or any other @-mention) so the word right
+    // after it is what gets checked against the skill registry — Teams
+    // message text arrives with the mention still in it.
+    private static readonly Regex LeadingMentionPattern = new(@"^@\S+\s*", RegexOptions.Compiled);
 
     private const string HealthCheckSystemPrompt =
         "You are an SRE assistant. You are given raw Kubernetes cluster health JSON collected by Kubex. " +
@@ -90,21 +96,72 @@ public class ClaudeSummaryService(
 
         var model = string.IsNullOrWhiteSpace(settings.Model) ? DefaultModel : settings.Model;
 
-        var urlMatch = McpUrlPattern.Match(command);
-        if (!urlMatch.Success)
+        // Drop a leading "@KubexAI" (or any @-mention) before anything below
+        // looks at the command's first word — Teams delivers the mention as
+        // literal text, and it would otherwise shadow a skill word.
+        var content = LeadingMentionPattern.Replace(command.Trim(), string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(content))
         {
-            return CallClaudeAsync(settings.ApiKey, model, AskSystemPrompt, command, cancellationToken);
+            content = command.Trim();
         }
 
-        var mcpServerUrl = urlMatch.Value;
-        var instruction = command.Remove(urlMatch.Index, urlMatch.Length).Trim();
-        if (string.IsNullOrWhiteSpace(instruction))
+        var urlMatch = McpUrlPattern.Match(content);
+        if (urlMatch.Success)
         {
-            instruction = "Check the fleet's health.";
+            var mcpServerUrl = urlMatch.Value;
+            var instruction = content.Remove(urlMatch.Index, urlMatch.Length).Trim();
+            if (string.IsNullOrWhiteSpace(instruction))
+            {
+                instruction = "Check the fleet's health.";
+            }
+
+            return CallClaudeAsync(
+                settings.ApiKey, model, KubexMcpSystemPrompt, instruction, cancellationToken, mcpServerUrl);
         }
 
-        return CallClaudeAsync(
-            settings.ApiKey, model, KubexMcpSystemPrompt, instruction, cancellationToken, mcpServerUrl);
+        // No MCP URL — see if the first word names an installed skill
+        // (skills/<name>/SKILL.md, loaded by SkillRegistry). If so, that
+        // file's contents become the system prompt and everything after the
+        // skill word becomes the user's instruction to it. Otherwise, fall
+        // back to a plain free-form question.
+        var (skill, rest) = ResolveSkill(content);
+        if (skill is not null)
+        {
+            var skillInput = BuildDateContext() + (string.IsNullOrWhiteSpace(rest) ? "Run this skill." : rest);
+            return CallClaudeAsync(settings.ApiKey, model, skill.Instructions, skillInput, cancellationToken);
+        }
+
+        return CallClaudeAsync(settings.ApiKey, model, AskSystemPrompt, content, cancellationToken);
+    }
+
+    private (Skill? Skill, string Rest) ResolveSkill(string content)
+    {
+        var spaceIndex = content.IndexOf(' ');
+        var firstWord = spaceIndex < 0 ? content : content[..spaceIndex];
+        var rest = spaceIndex < 0 ? string.Empty : content[(spaceIndex + 1)..].Trim();
+        return (skillRegistry.Find(firstWord), rest);
+    }
+
+    // Claude has no clock of its own — skills that need "today" (like
+    // onthisday) get it supplied here rather than guessing from training data.
+    private static string BuildDateContext()
+    {
+        DateTime now;
+        try
+        {
+            var eastern = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
+            now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, eastern);
+        }
+        catch (TimeZoneNotFoundException)
+        {
+            now = DateTime.UtcNow;
+        }
+        catch (InvalidTimeZoneException)
+        {
+            now = DateTime.UtcNow;
+        }
+
+        return $"[Context: today's date is {now:yyyy-MM-dd} ({now:dddd}), US Eastern.]\n\n";
     }
 
     private async Task<string> CallClaudeAsync(

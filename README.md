@@ -60,6 +60,26 @@ The MCP server's own auth token comes from the server-side `KubexMcpSettings:Aut
 
 When an MCP URL is present, Claude is given a Kubex-fleet-health-specific system prompt (`KubexMcpSystemPrompt` in `ClaudeSummaryService.cs`) instead of the generic one — it's told to call the MCP server's cluster-connections tool and report cluster count, status, 24-hour data freshness, and forwarder/Prometheus version drift, in one clean paragraph. This is adapted from the `skills/kubex-health-check/SKILL.md` Claude Code skill (see that file for the full original logic, and for why it isn't used as-is here — Skills are a Claude Code/Claude.ai feature, not something the raw Messages API loads).
 
+### Word-dispatched skills
+
+If a `command` has no MCP URL in it, the backend checks whether its first word names an installed skill — a folder under `skills/` containing a `SKILL.md`. If it matches (case- and punctuation-insensitive, and tolerant of a leading `@KubexAI` mention), that file's contents become the system prompt for the request, and everything after the skill word becomes the instruction sent to Claude. If nothing matches, the command is treated as a plain free-form question, same as before.
+
+**Adding a new skill is just adding a folder** — no code change, no config edit, no restart logic to wire up:
+
+```
+skills/
+  onthisday/
+    SKILL.md      # dispatched as "@KubexAI onthisday"
+  kubex-health-check/
+    SKILL.md      # NOT dispatched — see below
+```
+
+- The dispatch word is the folder name. `onthisday`, `OnThisDay`, and `onthisday?` (trailing punctuation from a Teams message) all resolve to the same skill.
+- `SKILL.md`'s full contents are used as-is as the system prompt — write it the same way you'd write instructions for a Claude Code skill (see `skills/onthisday/SKILL.md` for the pattern: what it does, how to read the invocation, step-by-step rules, and the exact output style).
+- Every skill dispatch is automatically given the current date (`US Eastern`) as a short context line before the instruction, since Claude has no clock of its own — a skill that needs "today" (like `onthisday`) can just say so in its instructions and rely on that context being there.
+- To load a `SKILL.md` for documentation only, **without** making it dispatchable — because its real logic needs something code-level the generic dispatcher can't provide, like an MCP server actually attached to the request — put `<!-- dispatch:false -->` as the first line. `skills/kubex-health-check/SKILL.md` does this: its job is already handled correctly by the MCP-URL flow above, and a bare word match couldn't attach the MCP server it needs.
+- Skills are loaded once at startup (`SkillRegistry` in `backend/src/Services/`), from a `skills/` folder resolved as the sibling of `backend/` — matching how every workflow in `.github/workflows/` runs the backend (`dotnet run` from `backend/`). Override the location with a top-level `SkillsDirectory` config key if you ever need to.
+
 ## Frontend
 
 `frontend/index.html` is a single static page (no build step) — open it directly in a browser, or serve it with any static file server. Fill in the API base URL, then use it to save the webhook URL, send messages, run the Kubex health check, or ask Claude a one-off question (pasting your own Anthropic API key into that form).

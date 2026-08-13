@@ -1,3 +1,10 @@
+<!-- dispatch:false — this skill's real logic needs a Kubex MCP server actually
+     attached to the request (see backend/src/Services/SkillRegistry.cs). The
+     backend's generic skill dispatcher can only supply plain instruction
+     text, so it can't wire that up; the existing URL-based flow in
+     ClaudeSummaryService.RunCommandAsync already handles this skill's job
+     correctly and takes priority regardless of this marker. -->
+
 # Kubex Health Check
 
 ## What this skill does
@@ -72,11 +79,11 @@ Expected behavior: resolve `sandboxuat-mcp.kubex.ai` to its connected Kubex conn
 
 ---
 
-## Note: this file is a backup, not a live dependency
+## Note: this specific file is a backup, not a live dependency
 
-This is your personal Claude Code / Claude Desktop skill, copied here for version control. It is **not** read by the KubexHealthCheck backend or the raw Claude API — Skills are a Claude Code/Claude.ai feature (loaded by that harness based on the trigger description), not something `POST /v1/messages` understands on its own.
+This is your personal Claude Code / Claude Desktop skill, copied here for version control. Skills are a Claude Code/Claude.ai harness feature — `POST /v1/messages` has no native concept of a "skill" — so **on its own**, a `SKILL.md` file means nothing to the raw API; something has to read it and hand its contents to Claude as instructions.
 
-The backend's `/api/claude/command` endpoint (see `backend/src/Services/ClaudeSummaryService.cs`) implements the *equivalent* analytical logic directly as a system prompt (`KubexMcpSystemPrompt`), adapted for the API context:
+As of `backend/src/Services/SkillRegistry.cs`, the backend now does exactly that for skills under `skills/` — any folder there with a `SKILL.md` is loaded at startup, and typing its folder name as the first word of a Teams command (e.g. `@KubexAI onthisday`) makes the backend use that file's contents as the system prompt for that request. **This particular file opts out of that** (see the `dispatch:false` marker at the top): its instructions assume a Kubex MCP server is already attached to the request, which the generic dispatcher has no way to provide — attaching an MCP server needs real code (`mcp_servers` + `tools` on the API call), not just prompt text. This file stays here for documentation and for Claude Code, but the backend's actual equivalent logic is hardcoded directly as a system prompt (`KubexMcpSystemPrompt`), adapted for the API context:
 
 - No connector resolution (steps in "Reading the parameter" above) — the MCP server URL is already given explicitly in the command text, so there's no ambiguous client name to match against a connector list.
 - No local file write (step 7 above) — the backend has no access to your PC's filesystem. Instead, the response is posted straight to your Teams webhook by the backend itself (see `POST /api/claude/command` in the main README).
