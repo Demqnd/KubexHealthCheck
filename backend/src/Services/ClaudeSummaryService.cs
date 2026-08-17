@@ -246,9 +246,9 @@ public class ClaudeSummaryService(
                     // though this skill only ever calls one of them). Add a
                     // name here if a future skill needs a different Kubex tool.
                     ["default_config"] = new JsonObject { ["enabled"] = false },
-                    ["configs"] = new JsonArray
+                    ["configs"] = new JsonObject
                     {
-                        new JsonObject { ["name"] = RequiredMcpToolName, ["enabled"] = true }
+                        [RequiredMcpToolName] = new JsonObject { ["enabled"] = true }
                     }
                 }
             };
