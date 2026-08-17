@@ -19,6 +19,11 @@ public class ClaudeSummaryService(
     private const string DefaultModel = "claude-opus-5";
     private const string McpServerName = "kubex-mcp";
 
+    // The only Kubex MCP tool this service actually calls right now. Used to
+    // allowlist the mcp_toolset below — see the comment on "tools" in
+    // CallClaudeAsync for why that matters.
+    private const string RequiredMcpToolName = "kubex-cluster-connections";
+
     private static readonly Regex McpUrlPattern = new(@"https?://\S+", RegexOptions.Compiled);
 
     // Strips a leading "@KubexAI" (or any other @-mention) so the word right
@@ -233,7 +238,18 @@ public class ClaudeSummaryService(
                 new JsonObject
                 {
                     ["type"] = "mcp_toolset",
-                    ["mcp_server_name"] = McpServerName
+                    ["mcp_server_name"] = McpServerName,
+                    // Allowlist: without this, Anthropic loads the MCP server's
+                    // ENTIRE tool catalog into every request (Kubex's server
+                    // exposes ~28 tools with verbose descriptions - tens of
+                    // thousands of input tokens billed on every call, even
+                    // though this skill only ever calls one of them). Add a
+                    // name here if a future skill needs a different Kubex tool.
+                    ["default_config"] = new JsonObject { ["enabled"] = false },
+                    ["configs"] = new JsonArray
+                    {
+                        new JsonObject { ["name"] = RequiredMcpToolName, ["enabled"] = true }
+                    }
                 }
             };
         }
