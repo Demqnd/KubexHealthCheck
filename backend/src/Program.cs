@@ -41,7 +41,6 @@ builder.Services.AddCors(options =>
 });
 
 builder.Services.Configure<ApiKeySettings>(builder.Configuration.GetSection("ApiKeySettings"));
-builder.Services.Configure<KubexApiSettings>(builder.Configuration.GetSection("KubexApiSettings"));
 builder.Services.Configure<ClaudeApiSettings>(builder.Configuration.GetSection("ClaudeApiSettings"));
 builder.Services.Configure<WebhookSettings>(builder.Configuration.GetSection("WebhookSettings"));
 builder.Services.Configure<KubexMcpSettings>(builder.Configuration.GetSection("KubexMcpSettings"));
@@ -49,10 +48,6 @@ builder.Services.Configure<KubexMcpSettings>(builder.Configuration.GetSection("K
 builder.Services.AddHttpClient("Webhook", client =>
 {
     client.Timeout = TimeSpan.FromSeconds(15);
-});
-builder.Services.AddHttpClient("KubexApi", client =>
-{
-    client.Timeout = TimeSpan.FromSeconds(30);
 });
 builder.Services.AddHttpClient("ClaudeApi", client =>
 {
@@ -62,7 +57,6 @@ builder.Services.AddHttpClient("ClaudeApi", client =>
 builder.Services.AddSingleton<IWebhookRoutineStore, JsonFileWebhookRoutineStore>();
 builder.Services.AddSingleton<ISkillRegistry, SkillRegistry>();
 builder.Services.AddScoped<IWebhookMessageSender, WebhookMessageSender>();
-builder.Services.AddScoped<IKubexHealthCheckService, KubexHealthCheckService>();
 builder.Services.AddScoped<IClaudeSummaryService, ClaudeSummaryService>();
 builder.Services.AddScoped<ApiKeyAuthFilter>();
 

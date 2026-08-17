@@ -31,13 +31,6 @@ public class ClaudeSummaryService(
     // message text arrives with the mention still in it.
     private static readonly Regex LeadingMentionPattern = new(@"^@\S+\s*", RegexOptions.Compiled);
 
-    private const string HealthCheckSystemPrompt =
-        "You are an SRE assistant. You are given raw Kubernetes cluster health JSON collected by Kubex. " +
-        "Write a short, plain-text summary suitable for posting in a Teams message. Call out any cluster " +
-        "whose data collection is stale (no data in the last 24 hours), any Kubernetes version drift across " +
-        "clusters, and any node or container counts that look concerning. Keep it under 200 words. Do not " +
-        "use markdown formatting (no headers, bullets, or bold).";
-
     private const string AskSystemPrompt =
         "You are a helpful assistant. Answer the user's question clearly and concisely, in plain text " +
         "suitable for posting in a Teams message. Do not use markdown formatting (no headers, bullets, or bold).";
@@ -54,18 +47,6 @@ public class ClaudeSummaryService(
         "cluster-connections tool to get per-cluster health data, and produce a short plain-text summary " +
         "covering cluster count, status, 24-hour data freshness, and forwarder/Prometheus version drift. " +
         "Keep it to one tight paragraph, no markdown formatting - it will be posted directly as a Teams message.";
-
-    public Task<string> SummarizeHealthCheckAsync(string clusterDataJson, CancellationToken cancellationToken = default)
-    {
-        var settings = claudeOptions.Value;
-        if (string.IsNullOrWhiteSpace(settings.ApiKey))
-        {
-            throw new InvalidOperationException("ClaudeApiSettings:ApiKey is not configured.");
-        }
-
-        var model = string.IsNullOrWhiteSpace(settings.Model) ? DefaultModel : settings.Model;
-        return CallClaudeAsync(settings.ApiKey, model, HealthCheckSystemPrompt, clusterDataJson, cancellationToken);
-    }
 
     public Task<string> AskAsync(string apiKey, string question, CancellationToken cancellationToken = default)
     {

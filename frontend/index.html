@@ -54,13 +54,6 @@
 
   <hr />
 
-  <p class="hint">Runs a real Kubex fleet health check (via the Kubex REST API, configured server-side) and posts the summary to the webhook above.</p>
-  <button id="healthCheckButton" type="button">Run Kubex Health Check &amp; Post to Teams</button>
-  <div id="healthCheckBanner"></div>
-  <pre id="healthCheckSummary" class="hint" style="white-space: pre-wrap;"></pre>
-
-  <hr />
-
   <p class="hint">Ask Claude anything using your own Anthropic API key. The key is only used for this request — it's never saved or sent anywhere except directly to your local backend.</p>
 
   <form id="askForm">
@@ -174,35 +167,6 @@
         messageInput.value = "";
       } catch {
         showBanner(sendBanner, "Failed to reach the server.", true);
-      }
-    });
-
-    const healthCheckButton = document.getElementById("healthCheckButton");
-    const healthCheckBanner = document.getElementById("healthCheckBanner");
-    const healthCheckSummary = document.getElementById("healthCheckSummary");
-
-    healthCheckButton.addEventListener("click", async () => {
-      healthCheckButton.disabled = true;
-      healthCheckButton.textContent = "Running...";
-      healthCheckSummary.textContent = "";
-      try {
-        const response = await fetch(`${apiBaseUrlInput.value}/api/kubexhealthcheck/run`, {
-          method: "POST",
-          headers: headers(),
-        });
-        const data = await response.json().catch(() => null);
-        if (!response.ok) {
-          showBanner(healthCheckBanner, data?.message ?? "Health check failed.", true);
-          if (data?.summary) healthCheckSummary.textContent = data.summary;
-          return;
-        }
-        showBanner(healthCheckBanner, data?.message ?? "Health check posted.", false);
-        if (data?.summary) healthCheckSummary.textContent = data.summary;
-      } catch {
-        showBanner(healthCheckBanner, "Failed to reach the server.", true);
-      } finally {
-        healthCheckButton.disabled = false;
-        healthCheckButton.textContent = "Run Kubex Health Check & Post to Teams";
       }
     });
 
