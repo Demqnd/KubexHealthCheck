@@ -73,13 +73,17 @@ skills/
   onthisday/
     SKILL.md      # dispatched as "@KubexAI onthisday"
   kubex-health-check/
-    SKILL.md      # dispatch:false — only usable via the MCP-URL path above, see that section
+    SKILL.md      # full status/freshness/version-drift summary
+  kubex-cluster-count/
+    SKILL.md      # model:claude-haiku-4-5-20251001 — just the cluster count, on a cheaper model
 ```
 
 - The dispatch word is the folder name. `onthisday`, `OnThisDay`, and `onthisday?` (trailing punctuation from a Teams message) all resolve to the same skill.
 - `SKILL.md`'s full contents are used as-is as the system prompt — write it the same way you'd write instructions for a Claude Code skill (see `skills/onthisday/SKILL.md` for the pattern: what it does, how to read the invocation, step-by-step rules, and the exact output style). `skills/kubex-health-check/SKILL.md` is a more advanced example: one file, written to work correctly in *two* different contexts (interactive Claude Code/Desktop, and this backend) by explicitly branching on which one applies at the one step where they differ.
 - Every skill dispatch is automatically given the current date (`US Eastern`) as a short context line before the instruction, since Claude has no clock of its own — a skill that needs "today" (like `onthisday`) can just say so in its instructions and rely on that context being there.
-- `<!-- dispatch:false -->` as the first line means: **not usable from this plain word-dispatch path**, because that logic needs something code-level this path can't provide — an MCP server actually attached to the request being the main case. It does *not* mean "never used" — see MCP-connected commands above, where the same skill is fully usable once a URL supplies the thing the marker was guarding against.
+- Marker lines are read from a leading block of `<!-- ... -->` HTML comments at the top of the file (reading stops at the first non-comment line), so a skill can carry more than one:
+  - `<!-- dispatch:false -->` means: **not usable from this plain word-dispatch path**, because that logic needs something code-level this path can't provide — an MCP server actually attached to the request being the main case. It does *not* mean "never used" — see MCP-connected commands above, where the same skill is fully usable once a URL supplies the thing the marker was guarding against.
+  - `<!-- model:claude-haiku-4-5-20251001 -->` overrides `ClaudeApiSettings:Model` for just this skill. Use it for a narrow, cheap skill that doesn't need Opus-level reasoning — e.g. `skills/kubex-cluster-count/SKILL.md` calls one MCP tool and reports the array length, so it runs on Haiku instead of the fleet-wide default. Every other skill keeps using whatever `ClaudeApiSettings:Model` is configured to.
 - Skills are loaded once at startup (`SkillRegistry` in `backend/src/Services/`), from a `skills/` folder resolved as the sibling of `backend/` — matching how every workflow in `.github/workflows/` runs the backend (`dotnet run` from `backend/`). Override the location with a top-level `SkillsDirectory` config key if you ever need to.
 
 ## Frontend

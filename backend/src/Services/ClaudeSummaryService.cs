@@ -115,7 +115,8 @@ public class ClaudeSummaryService(
                 var mcpSkillInput = BuildDateContext() + BuildMcpContext(mcpServerUrl)
                     + (string.IsNullOrWhiteSpace(mcpRest) ? "Run this skill." : mcpRest);
                 return CallClaudeAsync(
-                    settings.ApiKey, model, mcpSkill.Instructions, mcpSkillInput, cancellationToken, mcpServerUrl);
+                    settings.ApiKey, ResolveModel(mcpSkill, model), mcpSkill.Instructions, mcpSkillInput,
+                    cancellationToken, mcpServerUrl);
             }
 
             // No recognized skill word after the URL (e.g. "@KubexAI <url>
@@ -127,8 +128,8 @@ public class ClaudeSummaryService(
             if (defaultSkill is not null)
             {
                 return CallClaudeAsync(
-                    settings.ApiKey, model, BuildDateContext() + defaultSkill.Instructions, defaultInstruction,
-                    cancellationToken, mcpServerUrl);
+                    settings.ApiKey, ResolveModel(defaultSkill, model), BuildDateContext() + defaultSkill.Instructions,
+                    defaultInstruction, cancellationToken, mcpServerUrl);
             }
 
             // skills/kubex-health-check/SKILL.md itself is missing or
@@ -147,7 +148,7 @@ public class ClaudeSummaryService(
         if (skill is { GenericallyDispatchable: true })
         {
             var skillInput = BuildDateContext() + (string.IsNullOrWhiteSpace(rest) ? "Run this skill." : rest);
-            return CallClaudeAsync(settings.ApiKey, model, skill.Instructions, skillInput, cancellationToken);
+            return CallClaudeAsync(settings.ApiKey, ResolveModel(skill, model), skill.Instructions, skillInput, cancellationToken);
         }
 
         return CallClaudeAsync(settings.ApiKey, model, AskSystemPrompt, content, cancellationToken);
@@ -160,6 +161,12 @@ public class ClaudeSummaryService(
         var rest = spaceIndex < 0 ? string.Empty : content[(spaceIndex + 1)..].Trim();
         return (skillRegistry.Find(firstWord), rest);
     }
+
+    // A skill's own "<!-- model:... -->" marker (see Skill.Model) wins over
+    // the caller's model, so one narrow/cheap skill can run on a cheaper
+    // model without changing what every other command uses.
+    private static string ResolveModel(Skill skill, string fallbackModel) =>
+        string.IsNullOrWhiteSpace(skill.Model) ? fallbackModel : skill.Model;
 
     // Claude has no clock of its own — skills that need "today" (like
     // onthisday) get it supplied here rather than guessing from training data.

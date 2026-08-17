@@ -16,4 +16,11 @@ public class Skill
     // the MCP-URL path does not, since it's exactly the context the marker
     // is about.
     public required bool GenericallyDispatchable { get; init; }
+
+    // Set from a "<!-- model:claude-haiku-4-5-20251001 -->" marker line —
+    // lets a narrow, cheap skill (e.g. one that only needs to count entries
+    // in a tool result) run on a cheaper model than ClaudeApiSettings:Model,
+    // without that override affecting every other command. Null means "use
+    // whatever model the caller was already going to use."
+    public string? Model { get; init; }
 }

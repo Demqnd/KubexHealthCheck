@@ -20,6 +20,7 @@ public class SkillRegistry : ISkillRegistry
 {
     private const string DispatchDisabledMarker = "dispatch:false";
     private static readonly Regex NonAlphaNumeric = new("[^a-z0-9]", RegexOptions.Compiled);
+    private static readonly Regex ModelMarkerPattern = new(@"model:\s*(\S+)", RegexOptions.Compiled);
 
     private readonly Dictionary<string, Skill> _bySlug = new(StringComparer.Ordinal);
     private readonly List<Skill> _all = [];
@@ -54,8 +55,32 @@ public class SkillRegistry : ISkillRegistry
             try
             {
                 var content = File.ReadAllText(skillFile);
-                var firstLine = content.TrimStart().Split('\n', 2)[0];
-                var genericallyDispatchable = !firstLine.Contains(DispatchDisabledMarker, StringComparison.OrdinalIgnoreCase);
+
+                // Markers are read from a leading block of HTML comment
+                // lines only (scanning stops at the first non-comment line),
+                // so a skill can carry more than one — e.g. both
+                // "<!-- dispatch:false -->" and "<!-- model:... -->".
+                var genericallyDispatchable = true;
+                string? model = null;
+                foreach (var rawLine in content.TrimStart().Split('\n'))
+                {
+                    var line = rawLine.Trim();
+                    if (!line.StartsWith("<!--", StringComparison.Ordinal))
+                    {
+                        break;
+                    }
+
+                    if (line.Contains(DispatchDisabledMarker, StringComparison.OrdinalIgnoreCase))
+                    {
+                        genericallyDispatchable = false;
+                    }
+
+                    var modelMatch = ModelMarkerPattern.Match(line);
+                    if (modelMatch.Success)
+                    {
+                        model = modelMatch.Groups[1].Value.Trim();
+                    }
+                }
 
                 var slug = Normalize(folderName);
                 if (string.IsNullOrEmpty(slug))
@@ -68,6 +93,7 @@ public class SkillRegistry : ISkillRegistry
                     Slug = slug,
                     Instructions = content.Trim(),
                     GenericallyDispatchable = genericallyDispatchable,
+                    Model = model,
                 };
                 _bySlug[slug] = skill;
                 _all.Add(skill);
@@ -75,6 +101,11 @@ public class SkillRegistry : ISkillRegistry
                 if (!genericallyDispatchable)
                 {
                     logger.LogInformation("Skill '{Folder}' is marked dispatch:false — only usable from an MCP-attached request.", folderName);
+                }
+
+                if (!string.IsNullOrEmpty(model))
+                {
+                    logger.LogInformation("Skill '{Folder}' overrides the model to '{Model}'.", folderName, model);
                 }
             }
             catch (IOException ex)
