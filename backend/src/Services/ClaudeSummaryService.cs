@@ -37,30 +37,18 @@ public class ClaudeSummaryService(
         "You are a helpful assistant. Answer the user's question clearly and concisely, in plain text " +
         "suitable for posting in a Teams message. Do not use markdown formatting (no headers, bullets, or bold).";
 
-    // Adapted from the "Kubex Health Check" Claude Code skill (see skills/kubex-health-check/SKILL.md)
-    // for use over the raw Messages API: no connector-name resolution (the MCP URL is already given
-    // explicitly) and no local file write (the answer is posted to Teams by this service instead).
-    private const string KubexMcpSystemPrompt =
-        "You are an SRE assistant with access to a connected Kubex MCP server's tools. When asked about " +
-        "cluster health, call the Kubex cluster-connections tool to get per-cluster data: clusterName, " +
-        "status, lastDataCollectionTime, forwarderVersion, prometheusVersion, kubernetesVersion, nodeCount, " +
-        "containerCount. Each entry is one cluster connection. " +
-        "Produce a short plain-text summary, in this order: " +
-        "1) Cluster count - how many clusters are connected, e.g. \"14 clusters connected.\" " +
-        "2) Status check - a cluster is healthy if its status is \"Ready\" or \"Collecting\"; anything else " +
-        "needs action. If all healthy, say so in one line. If not, name the unhealthy cluster(s) and their " +
-        "status, e.g. \"2 clusters need attention: foo-cluster (Error), bar-cluster (Disconnected).\" " +
-        "3) Freshness check - compare each cluster's lastDataCollectionTime to now (default to US Eastern " +
-        "time unless told otherwise) against a 24-hour window. If all fresh, say so and include the most " +
-        "recent collection time in hours to one decimal place, e.g. \"All 14 clusters have collected data " +
-        "in the past 24 hours (most recent: 9.1h ago).\" If any are stale, name them and how stale, e.g. " +
-        "\"3 of 14 clusters haven't collected in over 24 hours: foo-cluster (last seen 31h ago).\" " +
-        "4) Version drift - for forwarderVersion and prometheusVersion separately: if uniform across all " +
-        "clusters, say so (\"all 14 clusters on forwarder v4.3.0\"); otherwise name only the oldest version " +
-        "present and how many clusters run it (\"oldest forwarder version is v4.1.0, running on 2 of 14 " +
-        "clusters\"). Don't list every version/cluster combination. " +
-        "Keep the whole summary to one tight paragraph, plain text only (no markdown, no headers, no " +
-        "bullets, no bold) - it will be posted directly as a Teams message.";
+    // Last-resort fallback only: used if an MCP command can't find ANY loaded
+    // skill to run — not even skills/kubex-health-check — which normally only
+    // happens if the skills/ folder is missing or misconfigured (see
+    // SkillsDirectory in SkillRegistry). In normal operation, the actual
+    // skills/kubex-health-check/SKILL.md content is what runs; this constant
+    // is not that file and will drift from it — it's a safety net, not a copy
+    // to keep in sync.
+    private const string FallbackKubexMcpSystemPrompt =
+        "You are an SRE assistant with access to a connected Kubex MCP server's tools. Call the Kubex " +
+        "cluster-connections tool to get per-cluster health data, and produce a short plain-text summary " +
+        "covering cluster count, status, 24-hour data freshness, and forwarder/Prometheus version drift. " +
+        "Keep it to one tight paragraph, no markdown formatting - it will be posted directly as a Teams message.";
 
     public Task<string> SummarizeHealthCheckAsync(string clusterDataJson, CancellationToken cancellationToken = default)
     {
@@ -110,22 +98,46 @@ public class ClaudeSummaryService(
         {
             var mcpServerUrl = urlMatch.Value;
             var instruction = content.Remove(urlMatch.Index, urlMatch.Length).Trim();
-            if (string.IsNullOrWhiteSpace(instruction))
+
+            // Does the word right after the URL name a loaded skill (e.g.
+            // "kubex-health-check", "fedex-cost-report")? This check ignores
+            // GenericallyDispatchable on purpose: an MCP server is already
+            // attached below, so a skill marked dispatch:false for the
+            // no-MCP path is exactly usable here.
+            var (mcpSkill, mcpRest) = ResolveSkill(instruction);
+            if (mcpSkill is not null)
             {
-                instruction = "Check the fleet's health.";
+                var mcpSkillInput = BuildDateContext() + (string.IsNullOrWhiteSpace(mcpRest) ? "Run this skill." : mcpRest);
+                return CallClaudeAsync(
+                    settings.ApiKey, model, mcpSkill.Instructions, mcpSkillInput, cancellationToken, mcpServerUrl);
             }
 
+            // No recognized skill word after the URL (e.g. "@KubexAI <url>
+            // check cluster status") — default to skills/kubex-health-check,
+            // the same behavior this had before skill words existed here.
+            var defaultSkill = skillRegistry.Find("kubex-health-check");
+            var defaultInstruction = string.IsNullOrWhiteSpace(instruction) ? "Check the fleet's health." : instruction;
+            if (defaultSkill is not null)
+            {
+                return CallClaudeAsync(
+                    settings.ApiKey, model, BuildDateContext() + defaultSkill.Instructions, defaultInstruction,
+                    cancellationToken, mcpServerUrl);
+            }
+
+            // skills/kubex-health-check/SKILL.md itself is missing or
+            // unreadable (misconfigured SkillsDirectory, bad deploy, etc.) —
+            // don't fail the request outright, answer with the fallback.
             return CallClaudeAsync(
-                settings.ApiKey, model, KubexMcpSystemPrompt, instruction, cancellationToken, mcpServerUrl);
+                settings.ApiKey, model, FallbackKubexMcpSystemPrompt, defaultInstruction, cancellationToken, mcpServerUrl);
         }
 
         // No MCP URL — see if the first word names an installed skill
-        // (skills/<name>/SKILL.md, loaded by SkillRegistry). If so, that
-        // file's contents become the system prompt and everything after the
-        // skill word becomes the user's instruction to it. Otherwise, fall
-        // back to a plain free-form question.
+        // (skills/<name>/SKILL.md, loaded by SkillRegistry). Skills marked
+        // dispatch:false are excluded here (GenericallyDispatchable == false)
+        // since this path has no way to attach an MCP server for them.
+        // Otherwise fall back to a plain free-form question.
         var (skill, rest) = ResolveSkill(content);
-        if (skill is not null)
+        if (skill is { GenericallyDispatchable: true })
         {
             var skillInput = BuildDateContext() + (string.IsNullOrWhiteSpace(rest) ? "Run this skill." : rest);
             return CallClaudeAsync(settings.ApiKey, model, skill.Instructions, skillInput, cancellationToken);

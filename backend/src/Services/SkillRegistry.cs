@@ -8,11 +8,14 @@ namespace KubexHealthCheck.Services;
 //
 // Dispatch word = the folder name, case- and punctuation-insensitive
 // ("onthisday", "OnThisDay", "on-this-day" and "onthisday?" all match the same
-// registered skill). A SKILL.md whose first line is the HTML comment
-// "<!-- dispatch:false -->" is loaded for documentation but never dispatched —
-// use that for a skill (like kubex-health-check) whose real logic needs code
-// this generic path can't provide (e.g. MCP tool wiring), so a bare skill-word
-// match can't silently produce a half-working answer.
+// registered skill). Every skill is always loaded and always matchable by
+// Find() — a SKILL.md whose first line is the HTML comment
+// "<!-- dispatch:false -->" is still loaded and still matchable, but its
+// Skill.GenericallyDispatchable comes back false. That flag only matters to
+// the plain no-MCP word-dispatch path in ClaudeSummaryService — a command
+// with an MCP URL attached can use a dispatch:false skill just fine, since
+// attaching the MCP server is exactly the thing the marker says the generic
+// (non-MCP) path can't do on its own.
 public class SkillRegistry : ISkillRegistry
 {
     private const string DispatchDisabledMarker = "dispatch:false";
@@ -52,11 +55,7 @@ public class SkillRegistry : ISkillRegistry
             {
                 var content = File.ReadAllText(skillFile);
                 var firstLine = content.TrimStart().Split('\n', 2)[0];
-                if (firstLine.Contains(DispatchDisabledMarker, StringComparison.OrdinalIgnoreCase))
-                {
-                    logger.LogInformation("Skill '{Folder}' is marked dispatch:false — loaded for docs only.", folderName);
-                    continue;
-                }
+                var genericallyDispatchable = !firstLine.Contains(DispatchDisabledMarker, StringComparison.OrdinalIgnoreCase);
 
                 var slug = Normalize(folderName);
                 if (string.IsNullOrEmpty(slug))
@@ -64,9 +63,19 @@ public class SkillRegistry : ISkillRegistry
                     continue;
                 }
 
-                var skill = new Skill { Slug = slug, Instructions = content.Trim() };
+                var skill = new Skill
+                {
+                    Slug = slug,
+                    Instructions = content.Trim(),
+                    GenericallyDispatchable = genericallyDispatchable,
+                };
                 _bySlug[slug] = skill;
                 _all.Add(skill);
+
+                if (!genericallyDispatchable)
+                {
+                    logger.LogInformation("Skill '{Folder}' is marked dispatch:false — only usable from an MCP-attached request.", folderName);
+                }
             }
             catch (IOException ex)
             {
@@ -75,7 +84,7 @@ public class SkillRegistry : ISkillRegistry
         }
 
         logger.LogInformation(
-            "Loaded {Count} dispatchable skill(s) from {Path}: {Slugs}",
+            "Loaded {Count} skill(s) from {Path}: {Slugs}",
             _all.Count, skillsDirectory, string.Join(", ", _all.Select(s => s.Slug)));
     }
 

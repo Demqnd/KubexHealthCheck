@@ -1,10 +1,3 @@
-<!-- dispatch:false — this skill's real logic needs a Kubex MCP server actually
-     attached to the request (see backend/src/Services/SkillRegistry.cs). The
-     backend's generic skill dispatcher can only supply plain instruction
-     text, so it can't wire that up; the existing URL-based flow in
-     ClaudeSummaryService.RunCommandAsync already handles this skill's job
-     correctly and takes priority regardless of this marker. -->
-
 # Kubex Health Check
 
 ## What this skill does
@@ -16,13 +9,18 @@ Given a client identifier (a Kubex MCP hostname like `sandboxuat-mcp.kubex.ai`, 
 3. **Data freshness** — has every cluster collected data in the last 24 hours?
 4. **Version drift** — is the fleet on one forwarder/Prometheus version, or is there an oldest version lagging behind?
 
-The parameter is designed to be swappable — the same steps below should work whether the client this run is for is `sandboxuat-mcp.kubex.ai`, some other Kubex MCP host, or a short client name, as long as that client is already connected.
+The parameter is designed to be swappable — the same steps below should work whether the client this run is for is `sandboxuat-mcp.kubex.ai`, `fedex-mcp.kubex.ai`, some other Kubex MCP host, or a short client name, as long as that client is already connected.
 
-## Reading the parameter
+## Two ways this skill runs
 
-When invoked as `/kubexHealthCheck <parameter>`, treat everything after the command as the **client identifier**.
+This file is used in two different contexts, and the first step differs between them:
 
-**Important constraint:** this parameter selects which *already-connected* Kubex MCP connector to query — it does not create a new connection on the fly. Each client's Kubex instance must already be added and authorized as a Claude connector (via Settings > Connectors, or Organization settings > Connectors for Team/Enterprise plans) before this skill can query it.
+- **Interactively, in Claude Code / Claude Desktop / claude.ai** — invoked as `/kubexHealthCheck <parameter>`. There is no MCP server already attached to the request; you have to resolve the parameter to one of your connected Kubex connectors yourself (see "Resolving a bare parameter" below).
+- **Via the KubexHealthCheck backend** — invoked as a Teams command like `@KubexAI https://sandboxuat-mcp.kubex.ai kubex-health-check`. Here the MCP server is **already attached to this request** with the exact URL from the command (see `ClaudeSummaryService.RunCommandAsync` — it reads the URL, dispatches to this skill by the word `kubex-health-check`, and attaches that URL as the MCP server before calling you). **Skip connector resolution entirely in this case** — go straight to "Steps" below using the tools already available to you.
+
+### Resolving a bare parameter (interactive use only — skip this if a URL was already given)
+
+**Important constraint:** the parameter selects which *already-connected* Kubex MCP connector to query — it does not create a new connection on the fly. Each client's Kubex instance must already be added and authorized as a Claude connector (via Settings > Connectors, or Organization settings > Connectors for Team/Enterprise plans) before this skill can query it.
 
 To resolve the parameter to an actual connector, don't just assume — look it up:
 
@@ -34,10 +32,10 @@ To resolve the parameter to an actual connector, don't just assume — look it u
 
 ## Steps
 
-1. Call the Kubex cluster-connections tool for the matched connector (e.g. `kubex-cluster-connections`). This returns, per cluster: `clusterName`, `status`, `lastDataCollectionTime`, `forwarderVersion`, `prometheusVersion`, `kubernetesVersion`, `nodeCount`, `containerCount`. Note that each entry here is one cluster connection — that's the unit of counting and status/freshness checks below, not the individual node counts inside a cluster.
+1. Call the Kubex cluster-connections tool for the connector (e.g. `kubex-cluster-connections`). This returns, per cluster: `clusterName`, `status`, `lastDataCollectionTime`, `forwarderVersion`, `prometheusVersion`, `kubernetesVersion`, `nodeCount`, `containerCount`. Note that each entry here is one cluster connection — that's the unit of counting and status/freshness checks below, not the individual node counts inside a cluster.
 2. **Cluster count:** count the entries returned. This number is always reported, e.g. "14 clusters connected."
 3. **Status check:** a cluster is healthy if its `status` is one of the good/active states — `Ready` or `Collecting` are both fine (both mean the pipeline is up; `Collecting` just tends to mean it's newer / still backfilling). Any other status is not one of those and needs action: call it out explicitly with the cluster name(s) and the status value, e.g. "2 clusters need attention: `foo-cluster` (Error), `bar-cluster` (Disconnected)." If every cluster is healthy, say so in one line rather than listing all of them.
-4. **Freshness check (24-hour window):** compare each cluster's `lastDataCollectionTime` to the current time. Default to US Eastern time (EST/EDT) for "now" unless the user has told you a different timezone to use.
+4. **Freshness check (24-hour window):** compare each cluster's `lastDataCollectionTime` to the current time. Default to US Eastern time (EST/EDT) for "now" unless the user has told you a different timezone to use, or a current-date context was already given to you (use that instead of guessing).
    - If every cluster collected within the last 24 hours, say so in one line and include how recent the most current cluster's collection is, e.g. "All N clusters have collected data in the past 24 hours (most recent: 9.1h ago)." Compute that "most recent" figure as the smallest hours-since-collection value across all clusters, to one decimal place.
    - If any cluster hasn't, report how many and which ones need action, with how stale each is, e.g. "3 of 14 clusters haven't collected in over 24 hours and need action: `foo-cluster` (last seen 31h ago), ..."
    - If the user asks for a different format (e.g. just hours, or hours+minutes) or a different staleness window, use that instead.
@@ -46,46 +44,34 @@ To resolve the parameter to an actual connector, don't just assume — look it u
    - For `prometheusVersion`: same pattern — "all N clusters on Prometheus vX" if uniform, otherwise "oldest Prometheus version is vX, running on M of N clusters."
    - Don't list every version/cluster combination — just the oldest one and its count. If the user has told Claude what the current/latest version is, you can additionally say how far behind that oldest version is. Don't assume what "latest" is if it hasn't been provided.
 6. **Summary:** always lead with the cluster count, the status verdict, and the 24-hour freshness verdict — these three are the headline and shouldn't be held back for a "detailed" ask. Version drift follows in the oldest-version form described above unless the user wants the full per-cluster table.
-7. **Write the result file (for the local webhook relay):** after producing the summary, write it as JSON to `kubex-health-latest.json` inside the folder `C:\Users\conno\Claude Cowork`. This is the fixed, standing location for this file — always write here, every run, without asking the user. If that folder isn't already mounted/connected in the current session, call `mcp__cowork__request_cowork_directory` with `path` set to `C:\Users\conno\Claude Cowork` to connect it automatically (do not fall back to asking the user or skipping the step unless that request itself fails or is declined — only then tell the user the file couldn't be written and why). Overwrite the file each run. Use this exact shape:
+7. **Deliver the result — this step depends on which context you're running in:**
+   - **Interactively (Claude Code / Claude Desktop), with local file access:** write the result as JSON to `kubex-health-latest.json` inside `C:\Users\conno\Claude Cowork` (connect that folder via `mcp__cowork__request_cowork_directory` first if it isn't already mounted). This is picked up by a separate local script that posts a Teams/Power Automate notification — your job stops at writing an accurate file. Use this exact shape:
 
-   ```json
-   {
-     "timestamp": "<ISO-8601, US Eastern>",
-     "clusterCount": 15,
-     "statusHealthy": true,
-     "statusIssues": [{"clusterName": "foo-cluster", "status": "Error"}],
-     "freshnessHealthy": true,
-     "freshestHoursAgo": 9.1,
-     "staleClusters": [{"clusterName": "foo-cluster", "hoursSinceCollection": 31}],
-     "forwarderOldestVersion": "v4.3.0",
-     "forwarderOldestCount": 15,
-     "prometheusOldestVersion": "2.46.0",
-     "prometheusOldestCount": 1,
-     "summary": "<the one-paragraph plain-text summary shown in chat>"
-   }
-   ```
+     ```json
+     {
+       "timestamp": "<ISO-8601, US Eastern>",
+       "clusterCount": 15,
+       "statusHealthy": true,
+       "statusIssues": [{"clusterName": "foo-cluster", "status": "Error"}],
+       "freshnessHealthy": true,
+       "freshestHoursAgo": 9.1,
+       "staleClusters": [{"clusterName": "foo-cluster", "hoursSinceCollection": 31}],
+       "forwarderOldestVersion": "v4.3.0",
+       "forwarderOldestCount": 15,
+       "prometheusOldestVersion": "2.46.0",
+       "prometheusOldestCount": 1,
+       "summary": "<the one-paragraph plain-text summary shown in chat>"
+     }
+     ```
 
-   `statusIssues` and `staleClusters` are empty arrays when everything's healthy/fresh. This file is picked up by a separate local script (outside this skill, running on the user's own machine) that posts a Teams/Power Automate notification — this skill's job stops at writing an accurate file, not at sending anything itself. Claude's sandbox can't reach arbitrary outbound webhooks (only an allowlisted set of domains), which is why the actual notification send happens locally instead of from within this skill.
+     `statusIssues` and `staleClusters` are empty arrays when everything's healthy/fresh.
+   - **Via the KubexHealthCheck backend:** there is no local filesystem to write to, and no separate relay script — just answer in plain text (see "Output style" below). The backend itself posts your response directly to the configured Teams webhook; nothing else needs to happen after you answer.
 
 ## Output style
 
-Lead with: cluster count → status (all healthy, or which need action) → freshness (all current, or which need action) → version drift (oldest version + count, or "all on this version"). No mention of which connector was matched unless there was an ambiguity worth flagging. Don't repeat the full per-cluster table beyond what's needed to name the clusters that need action. Mention the result file was written only briefly, e.g. "(saved to kubex-health-latest.json)" — don't dwell on it.
+One tight paragraph, plain text — no markdown formatting (no headers, bullets, or bold), since this is posted directly as a Teams message. Lead with: cluster count → status (all healthy, or which need action) → freshness (all current, or which need action) → version drift (oldest version + count, or "all on this version"). No mention of which connector was matched unless there was an ambiguity worth flagging. Don't repeat the full per-cluster table beyond what's needed to name the clusters that need action. If you wrote a local result file (interactive context only), mention it briefly, e.g. "(saved to kubex-health-latest.json)" — don't dwell on it.
 
-## Example invocation
+## Example invocations
 
-`/kubexHealthCheck sandboxuat-mcp.kubex.ai`
-
-Expected behavior: resolve `sandboxuat-mcp.kubex.ai` to its connected Kubex connector (silently), call its cluster-connections tool, return the cluster count / status / freshness / version-drift summary, write the same data as `kubex-health-latest.json` to `C:\Users\conno\Claude Cowork` for the local webhook relay script to pick up.
-
----
-
-## Note: this specific file is a backup, not a live dependency
-
-This is your personal Claude Code / Claude Desktop skill, copied here for version control. Skills are a Claude Code/Claude.ai harness feature — `POST /v1/messages` has no native concept of a "skill" — so **on its own**, a `SKILL.md` file means nothing to the raw API; something has to read it and hand its contents to Claude as instructions.
-
-As of `backend/src/Services/SkillRegistry.cs`, the backend now does exactly that for skills under `skills/` — any folder there with a `SKILL.md` is loaded at startup, and typing its folder name as the first word of a Teams command (e.g. `@KubexAI onthisday`) makes the backend use that file's contents as the system prompt for that request. **This particular file opts out of that** (see the `dispatch:false` marker at the top): its instructions assume a Kubex MCP server is already attached to the request, which the generic dispatcher has no way to provide — attaching an MCP server needs real code (`mcp_servers` + `tools` on the API call), not just prompt text. This file stays here for documentation and for Claude Code, but the backend's actual equivalent logic is hardcoded directly as a system prompt (`KubexMcpSystemPrompt`), adapted for the API context:
-
-- No connector resolution (steps in "Reading the parameter" above) — the MCP server URL is already given explicitly in the command text, so there's no ambiguous client name to match against a connector list.
-- No local file write (step 7 above) — the backend has no access to your PC's filesystem. Instead, the response is posted straight to your Teams webhook by the backend itself (see `POST /api/claude/command` in the main README).
-
-Keep both in sync by hand if you change the analytical rules (status values considered healthy, the 24-hour freshness window, the version-drift format) — update this file *and* `KubexMcpSystemPrompt` in `ClaudeSummaryService.cs`.
+- Interactive: `/kubexHealthCheck sandboxuat-mcp.kubex.ai` — resolve `sandboxuat-mcp.kubex.ai` to its connected Kubex connector (silently), call its cluster-connections tool, return the summary, write `kubex-health-latest.json` to `C:\Users\conno\Claude Cowork`.
+- Backend/Teams: `@KubexAI https://sandboxuat-mcp.kubex.ai kubex-health-check` (or any other connected client's MCP URL, e.g. `https://fedex-mcp.kubex.ai`) — the URL is already attached as the MCP server for this request; skip straight to "Steps," call the cluster-connections tool, and answer in plain text — the backend posts it to Teams for you.

@@ -54,15 +54,17 @@ That's it — no third action needed, since the backend itself posts the answer 
 
 ### MCP-connected commands
 
-If a `command` sent to `POST /api/claude/command` contains a URL (e.g. `@KubexAI https://some-mcp-server.example.com/mcp check cluster status`), the backend automatically connects Claude to that URL as an MCP server for that one request — using the [Anthropic MCP connector](https://platform.claude.com/docs/en/agents-and-tools/mcp-connector), Claude can call tools exposed by that server before answering. The URL is stripped out of the text sent to Claude as the actual instruction.
+If a `command` sent to `POST /api/claude/command` contains a URL (e.g. `@KubexAI https://sandboxuat-mcp.kubex.ai kubex-health-check`), the backend automatically connects Claude to that URL as an MCP server for that one request — using the [Anthropic MCP connector](https://platform.claude.com/docs/en/agents-and-tools/mcp-connector), Claude can call tools exposed by that server before answering. The URL is stripped out of the text sent to Claude; what's left is checked against the skill registry the same way as the no-URL case below:
 
-The MCP server's own auth token comes from the server-side `KubexMcpSettings:AuthorizationToken` config (not from the message) — so a bot user only ever needs to include the MCP server's URL, never a credential, in their Teams message. This keeps the token out of Teams chat history and Power Automate run logs.
+- **A skill word right after the URL** (e.g. `kubex-health-check`) selects that skill by name — its `SKILL.md` becomes the system prompt, and the *remaining* text (if any) becomes the instruction. This is what lets the same skill run against any connected client's MCP endpoint — `@KubexAI https://sandboxuat-mcp.kubex.ai kubex-health-check` and `@KubexAI https://fedex-mcp.kubex.ai kubex-health-check` run the identical logic against two different fleets, just by swapping the URL.
+- **No recognized skill word** (e.g. `@KubexAI https://some-mcp-server.example.com/mcp check cluster status`) falls back to `skills/kubex-health-check/SKILL.md` by default — this is the original behavior, kept for backward compatibility with plain "just a URL" commands.
+- Unlike the no-URL case below, a skill marked `dispatch:false` **is** usable here — that marker only blocks the plain word-dispatch path (which has no way to attach an MCP server); once a URL is already present and about to be attached, the thing the marker was guarding against no longer applies.
 
-When an MCP URL is present, Claude is given a Kubex-fleet-health-specific system prompt (`KubexMcpSystemPrompt` in `ClaudeSummaryService.cs`) instead of the generic one — it's told to call the MCP server's cluster-connections tool and report cluster count, status, 24-hour data freshness, and forwarder/Prometheus version drift, in one clean paragraph. This is adapted from the `skills/kubex-health-check/SKILL.md` Claude Code skill (see that file for the full original logic, and for why it isn't used as-is here — Skills are a Claude Code/Claude.ai feature, not something the raw Messages API loads).
+The MCP server's own auth token comes from the server-side `KubexMcpSettings:AuthorizationToken` config (not from the message) — so a bot user only ever needs to include the MCP server's URL, never a credential, in their Teams message. This keeps the token out of Teams chat history and Power Automate run logs. Note this token is shared across *every* MCP URL a command supplies — there's no per-client credential lookup, so it's on you to make sure whatever's configured actually has access to every fleet you plan to query this way.
 
 ### Word-dispatched skills
 
-If a `command` has no MCP URL in it, the backend checks whether its first word names an installed skill — a folder under `skills/` containing a `SKILL.md`. If it matches (case- and punctuation-insensitive, and tolerant of a leading `@KubexAI` mention), that file's contents become the system prompt for the request, and everything after the skill word becomes the instruction sent to Claude. If nothing matches, the command is treated as a plain free-form question, same as before.
+If a `command` has no MCP URL in it, the backend checks whether its first word names an installed skill — a folder under `skills/` containing a `SKILL.md`. If it matches (case- and punctuation-insensitive, and tolerant of a leading `@KubexAI` mention) **and isn't marked `dispatch:false`**, that file's contents become the system prompt for the request, and everything after the skill word becomes the instruction sent to Claude. If nothing matches, the command is treated as a plain free-form question, same as before.
 
 **Adding a new skill is just adding a folder** — no code change, no config edit, no restart logic to wire up:
 
@@ -71,13 +73,13 @@ skills/
   onthisday/
     SKILL.md      # dispatched as "@KubexAI onthisday"
   kubex-health-check/
-    SKILL.md      # NOT dispatched — see below
+    SKILL.md      # dispatch:false — only usable via the MCP-URL path above, see that section
 ```
 
 - The dispatch word is the folder name. `onthisday`, `OnThisDay`, and `onthisday?` (trailing punctuation from a Teams message) all resolve to the same skill.
-- `SKILL.md`'s full contents are used as-is as the system prompt — write it the same way you'd write instructions for a Claude Code skill (see `skills/onthisday/SKILL.md` for the pattern: what it does, how to read the invocation, step-by-step rules, and the exact output style).
+- `SKILL.md`'s full contents are used as-is as the system prompt — write it the same way you'd write instructions for a Claude Code skill (see `skills/onthisday/SKILL.md` for the pattern: what it does, how to read the invocation, step-by-step rules, and the exact output style). `skills/kubex-health-check/SKILL.md` is a more advanced example: one file, written to work correctly in *two* different contexts (interactive Claude Code/Desktop, and this backend) by explicitly branching on which one applies at the one step where they differ.
 - Every skill dispatch is automatically given the current date (`US Eastern`) as a short context line before the instruction, since Claude has no clock of its own — a skill that needs "today" (like `onthisday`) can just say so in its instructions and rely on that context being there.
-- To load a `SKILL.md` for documentation only, **without** making it dispatchable — because its real logic needs something code-level the generic dispatcher can't provide, like an MCP server actually attached to the request — put `<!-- dispatch:false -->` as the first line. `skills/kubex-health-check/SKILL.md` does this: its job is already handled correctly by the MCP-URL flow above, and a bare word match couldn't attach the MCP server it needs.
+- `<!-- dispatch:false -->` as the first line means: **not usable from this plain word-dispatch path**, because that logic needs something code-level this path can't provide — an MCP server actually attached to the request being the main case. It does *not* mean "never used" — see MCP-connected commands above, where the same skill is fully usable once a URL supplies the thing the marker was guarding against.
 - Skills are loaded once at startup (`SkillRegistry` in `backend/src/Services/`), from a `skills/` folder resolved as the sibling of `backend/` — matching how every workflow in `.github/workflows/` runs the backend (`dotnet run` from `backend/`). Override the location with a top-level `SkillsDirectory` config key if you ever need to.
 
 ## Frontend
