@@ -107,7 +107,8 @@ public class ClaudeSummaryService(
             var (mcpSkill, mcpRest) = ResolveSkill(instruction);
             if (mcpSkill is not null)
             {
-                var mcpSkillInput = BuildDateContext() + (string.IsNullOrWhiteSpace(mcpRest) ? "Run this skill." : mcpRest);
+                var mcpSkillInput = BuildDateContext() + BuildMcpContext(mcpServerUrl)
+                    + (string.IsNullOrWhiteSpace(mcpRest) ? "Run this skill." : mcpRest);
                 return CallClaudeAsync(
                     settings.ApiKey, model, mcpSkill.Instructions, mcpSkillInput, cancellationToken, mcpServerUrl);
             }
@@ -116,7 +117,8 @@ public class ClaudeSummaryService(
             // check cluster status") — default to skills/kubex-health-check,
             // the same behavior this had before skill words existed here.
             var defaultSkill = skillRegistry.Find("kubex-health-check");
-            var defaultInstruction = string.IsNullOrWhiteSpace(instruction) ? "Check the fleet's health." : instruction;
+            var defaultInstruction = BuildMcpContext(mcpServerUrl)
+                + (string.IsNullOrWhiteSpace(instruction) ? "Check the fleet's health." : instruction);
             if (defaultSkill is not null)
             {
                 return CallClaudeAsync(
@@ -175,6 +177,19 @@ public class ClaudeSummaryService(
 
         return $"[Context: today's date is {now:yyyy-MM-dd} ({now:dddd}), US Eastern.]\n\n";
     }
+
+    // The MCP server URL never reaches Claude any other way — it's stripped
+    // out of the command text and only ever appears in the request's
+    // mcp_servers config, which Claude's own context doesn't surface as
+    // readable text. Without this line, "no client identifier was mentioned"
+    // and "a client was already specified via URL" are indistinguishable to
+    // Claude, and a skill written to ask when nothing was specified (see
+    // skills/kubex-health-check/SKILL.md) has no way to tell them apart —
+    // it'll default to asking, every time, even though a URL was given.
+    private static string BuildMcpContext(string mcpServerUrl) =>
+        $"[Context: this request already has a Kubex MCP server attached, for {mcpServerUrl} — " +
+        "that's the client this run is for. Do not ask which client to use, and skip any " +
+        "connector-list/resolution step — just use the MCP tools already available to you.]\n\n";
 
     private async Task<string> CallClaudeAsync(
         string apiKey,
