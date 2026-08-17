@@ -216,7 +216,6 @@ public class ClaudeSummaryService(
             ["model"] = model,
             ["max_tokens"] = string.IsNullOrWhiteSpace(mcpServerUrl) ? 1024 : 4096,
             ["thinking"] = new JsonObject { ["type"] = "disabled" },
-            ["output_config"] = new JsonObject { ["effort"] = "low" },
             ["system"] = systemPrompt,
             ["messages"] = new JsonArray
             {
@@ -227,6 +226,15 @@ public class ClaudeSummaryService(
                 }
             }
         };
+
+        // Haiku models 400 on output_config.effort ("This model does not
+        // support the effort parameter") — only Opus/Sonnet-family models
+        // accept it, so skip it for anything Haiku (e.g. a skill's
+        // "<!-- model:... -->" override).
+        if (!model.Contains("haiku", StringComparison.OrdinalIgnoreCase))
+        {
+            requestBody["output_config"] = new JsonObject { ["effort"] = "low" };
+        }
 
         if (!string.IsNullOrWhiteSpace(mcpServerUrl))
         {
