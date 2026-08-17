@@ -26,6 +26,7 @@ jobs:
           ASPNETCORE_ENVIRONMENT: Production
           ApiKeySettings__Key: ${{ secrets.API_KEY }}
           ClaudeApiSettings__ApiKey: ${{ secrets.CLAUDE_API_KEY }}
+          KubexMcpSettings__AuthorizationToken: ${{ secrets.KUBEX_MCP_TOKEN }}
         run: |
           nohup dotnet run --configuration Release --no-build > backend.log 2>&1 &
           for i in $(seq 1 30); do
