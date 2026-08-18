@@ -11,13 +11,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-go@v5
         with:
-          dotnet-version: "10.0.x"
+          go-version: "1.24"
 
       - name: Build backend
         working-directory: backend
-        run: dotnet build --configuration Release
+        run: go build -o kubexhealthcheck .
 
       - name: Start backend
         working-directory: backend
@@ -28,7 +28,7 @@ jobs:
           ClaudeApiSettings__ApiKey: ${{ secrets.CLAUDE_API_KEY }}
           KubexMcpSettings__AuthorizationToken: ${{ secrets.KUBEX_MCP_TOKEN }}
         run: |
-          nohup dotnet run --configuration Release --no-build > backend.log 2>&1 &
+          nohup ./kubexhealthcheck > backend.log 2>&1 &
           for i in $(seq 1 30); do
             if curl -sf -H "X-Api-Key: ${{ secrets.API_KEY }}" http://localhost:5000/api/webhook > /dev/null; then
               echo "Backend is up"

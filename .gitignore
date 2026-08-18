@@ -1,6 +1,4 @@
-bin/
-obj/
-*.user
-.vs/
+/backend/kubexhealthcheck
+/backend/khc
 appsettings.*.local.json
 backend/data/

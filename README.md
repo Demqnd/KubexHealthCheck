@@ -4,18 +4,18 @@ A standalone webhook routine service: configure a webhook URL and send it messag
 
 ## Backend
 
-ASP.NET Core Web API (`backend/`), .NET 10. No database — the webhook URL is persisted to a small JSON file (`backend/data/webhook-routine.json`, gitignored) next to the project, so there's nothing to install or run besides the .NET SDK.
+A Go web service (`backend/`), no framework beyond the standard library (`net/http`). No database — the webhook URL is persisted to a small JSON file (`backend/data/webhook-routine.json`, gitignored) next to the project, so there's nothing to install or run besides the Go toolchain.
 
 Setup:
 
 ```bash
 cd backend
-dotnet restore
+go build .
 ```
 
 Every endpoint requires a shared-secret API key, since this service is meant to be reachable over the public internet (e.g. by a Teams bot). Send it as an `X-Api-Key` header on every request; requests without it, or with the wrong value, get `401`.
 
-Configure `appsettings.Development.json` (or environment variables):
+Configure `appsettings.Development.json` (or environment variables — same `Section__Key` names either way, e.g. `ApiKeySettings__Key`):
 
 - `ApiKeySettings:Key` — the shared secret. Generate one yourself (e.g. `openssl rand -hex 24`) and put the same value here, in the frontend's "API key" field, and in the `API_KEY` GitHub Actions secret. If this is left empty, the server responds `500` on every request rather than silently allowing unauthenticated access.
 - `WebhookSettings:DefaultUrl` — optional. If set, this becomes the webhook URL used by `/api/webhook/send` and `/api/claude/command`, with no `PUT /api/webhook` call needed first — useful so a fresh clone works immediately without a manual setup step. `PUT /api/webhook` still works as before and overrides this once called (the override is saved to `webhook-routine.json` and takes precedence from then on). Since this URL itself contains a secret signature, don't commit your real value — fill it in locally only, or set it via the `WebhookSettings__DefaultUrl` environment variable, same as `ApiKeySettings:Key`.
@@ -27,7 +27,7 @@ Configure `appsettings.Development.json` (or environment variables):
 Run:
 
 ```bash
-dotnet run
+go run .
 ```
 
 ### API
@@ -81,7 +81,7 @@ skills/
 - Marker lines are read from a leading block of `<!-- ... -->` HTML comments at the top of the file (reading stops at the first non-comment line), so a skill can carry more than one:
   - `<!-- dispatch:false -->` means: **not usable from this plain word-dispatch path**, because that logic needs something code-level this path can't provide — an MCP server actually attached to the request being the main case. It does *not* mean "never used" — see MCP-connected commands above, where the same skill is fully usable once a URL supplies the thing the marker was guarding against.
   - `<!-- model:claude-haiku-4-5-20251001 -->` overrides `ClaudeApiSettings:Model` for just this skill. Use it for a narrow, cheap skill that doesn't need Opus-level reasoning — e.g. `skills/kubex-cluster-count/SKILL.md` calls one MCP tool and reports the array length, so it runs on Haiku instead of the fleet-wide default. Every other skill keeps using whatever `ClaudeApiSettings:Model` is configured to.
-- Skills are loaded once at startup (`SkillRegistry` in `backend/src/Services/`), from a `skills/` folder resolved as the sibling of `backend/` — matching how every workflow in `.github/workflows/` runs the backend (`dotnet run` from `backend/`). Override the location with a top-level `SkillsDirectory` config key if you ever need to.
+- Skills are loaded once at startup (`internal/skills`), from a `skills/` folder resolved as the sibling of `backend/` — matching how every workflow in `.github/workflows/` runs the backend (from `backend/`). Override the location with a top-level `SkillsDirectory` config key if you ever need to.
 
 ## Frontend
 
@@ -123,5 +123,5 @@ Notes:
 
 - The token needs `Actions: Read and write` permission on this repo — create a **fine-grained personal access token** (GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens) scoped to just this repository, rather than a classic token with broad `repo` scope.
 - This call returns `202 Accepted` immediately — it does **not** wait for the workflow to finish or return Claude's answer. The answer still only reaches Teams the same way as before: the workflow calls `/api/claude/command`, which posts the response to your configured webhook itself.
-- Each run does a full `dotnet build` from scratch (no dependency/build caching configured), so expect ~30-90 seconds between sending a command and seeing a reply in Teams.
+- Each run does a full `go build` from scratch (no dependency/build caching configured), so expect ~30-60 seconds between sending a command and seeing a reply in Teams.
 - Running this repeatedly is still free or near-free — GitHub Actions is unlimited on public repos, and private repos get 2,000 free minutes/month on the default plan, well beyond what casual bot usage would use.
