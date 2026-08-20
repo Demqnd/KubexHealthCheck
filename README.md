@@ -85,7 +85,7 @@ skills/
 
 ## Frontend
 
-`frontend/index.html` is a single static page (no build step) — open it directly in a browser, or serve it with any static file server. Fill in the API base URL, then use it to save the webhook URL, send messages, run a `@KubexAI` command the same way Teams would, or ask Claude a one-off question (pasting your own Anthropic API key into that form).
+`frontend/index.html` is a single static page (no build step) — open it directly in a browser, or serve it with any static file server. It's just one command box that calls `POST /api/claude/command`, the same call a Teams bot makes — type whatever a Teams user would type after `@KubexAI` and send it. There are no input fields for the API base URL or the shared `X-Api-Key`; edit the `API_BASE_URL`/`API_KEY` constants at the top of the page's `<script>` instead, since every secret this service needs already lives server-side (`appsettings*.json` / GitHub secrets), not typed into the page.
 
 ## Scheduled message (GitHub Actions)
 
