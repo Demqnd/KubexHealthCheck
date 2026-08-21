@@ -11,11 +11,18 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"kubexhealthcheck/internal/config"
+	"kubexhealthcheck/internal/customers"
 	"kubexhealthcheck/internal/skills"
 )
+
+// How many customers' Claude calls run at once during a fleet report —
+// bounded so a 40-customer run doesn't slam Anthropic's rate limits with
+// 40 simultaneous requests.
+const fleetConcurrency = 5
 
 const (
 	apiUrl           = "https://api.anthropic.com/v1/messages"
@@ -52,18 +59,26 @@ var (
 	// right after it is what gets checked against the skill registry —
 	// Teams message text arrives with the mention still in it.
 	leadingMentionPattern = regexp.MustCompile(`^@\S+\s*`)
+
+	// "fleet <skillword> [instruction]" runs that skill against every
+	// customer in customers.json (each with its own MCP URL + token) and
+	// combines all their answers into one message, instead of the usual
+	// single-URL-per-command path.
+	fleetPrefixPattern = regexp.MustCompile(`(?i)^fleet\s+`)
 )
 
 type Service struct {
 	cfg           *config.Config
 	skillRegistry *skills.Registry
+	customersFile string
 	httpClient    *http.Client
 }
 
-func NewService(cfg *config.Config, skillRegistry *skills.Registry) *Service {
+func NewService(cfg *config.Config, skillRegistry *skills.Registry, customersFile string) *Service {
 	return &Service{
 		cfg:           cfg,
 		skillRegistry: skillRegistry,
+		customersFile: customersFile,
 		httpClient:    &http.Client{Timeout: 30 * time.Second},
 	}
 }
@@ -77,7 +92,7 @@ func (s *Service) Ask(apiKey, question string) (string, error) {
 	if strings.TrimSpace(model) == "" {
 		model = defaultModel
 	}
-	return s.callClaude(apiKey, model, askSystemPrompt, question, "")
+	return s.callClaude(apiKey, model, askSystemPrompt, question, "", "")
 }
 
 func (s *Service) RunCommand(command string) (string, error) {
@@ -99,9 +114,20 @@ func (s *Service) RunCommand(command string) (string, error) {
 		content = strings.TrimSpace(command)
 	}
 
+	// "fleet <skillword> [instruction]" — run that skill against every
+	// customer in customers.json, each with its own MCP URL + token, and
+	// combine all their answers into one message. Checked before the
+	// single-URL path below since a fleet command has no URL in it at
+	// all — the URLs come from customers.json instead.
+	if fleetRest := fleetPrefixPattern.ReplaceAllString(content, ""); fleetRest != content {
+		skillWord, instruction := splitFirstWord(fleetRest)
+		return s.RunFleet(apiKey, model, skillWord, instruction)
+	}
+
 	if loc := mcpUrlPattern.FindStringIndex(content); loc != nil {
 		mcpServerUrl := content[loc[0]:loc[1]]
 		instruction := strings.TrimSpace(content[:loc[0]] + content[loc[1]:])
+		mcpToken := s.cfg.KubexMcpSettings.AuthorizationToken
 
 		// Does the word right after the URL name a loaded skill (e.g.
 		// "kubex-health-check", "fedex-cost-report")? This ignores
@@ -111,7 +137,7 @@ func (s *Service) RunCommand(command string) (string, error) {
 		mcpSkill, mcpRest := s.resolveSkill(instruction)
 		if mcpSkill != nil {
 			mcpSkillInput := buildDateContext() + buildMcpContext(mcpServerUrl) + orDefault(mcpRest, "Run this skill.")
-			return s.callClaude(apiKey, resolveModel(mcpSkill, model), mcpSkill.Instructions, mcpSkillInput, mcpServerUrl)
+			return s.callClaude(apiKey, resolveModel(mcpSkill, model), mcpSkill.Instructions, mcpSkillInput, mcpServerUrl, mcpToken)
 		}
 
 		// No recognized skill word after the URL (e.g. "@KubexAI <url>
@@ -121,13 +147,13 @@ func (s *Service) RunCommand(command string) (string, error) {
 		if defaultSkill := s.skillRegistry.Find("kubex-health-check"); defaultSkill != nil {
 			return s.callClaude(
 				apiKey, resolveModel(defaultSkill, model), buildDateContext()+defaultSkill.Instructions,
-				defaultInstruction, mcpServerUrl)
+				defaultInstruction, mcpServerUrl, mcpToken)
 		}
 
 		// skills/kubex-health-check/SKILL.md itself is missing or
 		// unreadable (misconfigured SkillsDirectory, bad deploy, etc.) —
 		// don't fail the request outright, answer with the fallback.
-		return s.callClaude(apiKey, model, fallbackKubexMcpSystemPrompt, defaultInstruction, mcpServerUrl)
+		return s.callClaude(apiKey, model, fallbackKubexMcpSystemPrompt, defaultInstruction, mcpServerUrl, mcpToken)
 	}
 
 	// No MCP URL — see if the first word names an installed skill
@@ -137,18 +163,91 @@ func (s *Service) RunCommand(command string) (string, error) {
 	skill, rest := s.resolveSkill(content)
 	if skill != nil && skill.GenericallyDispatchable {
 		skillInput := buildDateContext() + orDefault(rest, "Run this skill.")
-		return s.callClaude(apiKey, resolveModel(skill, model), skill.Instructions, skillInput, "")
+		return s.callClaude(apiKey, resolveModel(skill, model), skill.Instructions, skillInput, "", "")
 	}
 
-	return s.callClaude(apiKey, model, askSystemPrompt, content, "")
+	return s.callClaude(apiKey, model, askSystemPrompt, content, "", "")
+}
+
+// RunFleet runs skillWord against every customer in customers.json,
+// each with its own MCP URL and auth token (unlike the single shared
+// KubexMcpSettings token used by the single-URL command path), and
+// combines every customer's one-line answer into a single message.
+//
+// This is the extension point for the "feed all the info back into
+// Claude for a final combined output" idea: right now the per-customer
+// answers are just joined line by line, but that join step is exactly
+// where a second Claude call synthesizing all of them into one polished
+// report would slot in later, without touching how the fan-out itself
+// works.
+func (s *Service) RunFleet(apiKey, model, skillWord, instruction string) (string, error) {
+	skill := s.skillRegistry.Find(skillWord)
+	if skill == nil {
+		return "", fmt.Errorf("no skill named %q is installed", skillWord)
+	}
+
+	list, err := customers.Load(s.customersFile)
+	if err != nil {
+		return "", fmt.Errorf("failed to load %s: %w", s.customersFile, err)
+	}
+	if len(list) == 0 {
+		return "", fmt.Errorf("no customers configured in %s", s.customersFile)
+	}
+
+	skillModel := resolveModel(skill, model)
+	dateContext := buildDateContext()
+
+	type outcome struct {
+		name string
+		text string
+		err  error
+	}
+
+	results := make([]outcome, len(list))
+	sem := make(chan struct{}, fleetConcurrency)
+	var wg sync.WaitGroup
+
+	for i, customer := range list {
+		wg.Add(1)
+		go func(i int, c customers.Customer) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			input := dateContext + buildMcpContext(c.McpUrl) + orDefault(instruction, "Run this skill.")
+			text, err := s.callClaude(apiKey, skillModel, skill.Instructions, input, c.McpUrl, c.AuthorizationToken)
+			results[i] = outcome{name: c.Name, text: strings.TrimSpace(text), err: err}
+		}(i, customer)
+	}
+	wg.Wait()
+
+	lines := make([]string, len(results))
+	failures := 0
+	for i, r := range results {
+		if r.err != nil {
+			failures++
+			lines[i] = fmt.Sprintf("%s: FAILED - %s", r.name, r.err.Error())
+		} else {
+			lines[i] = fmt.Sprintf("%s: %s", r.name, r.text)
+		}
+	}
+
+	summary := strings.Join(lines, "\n")
+	if failures > 0 {
+		summary = fmt.Sprintf("Fleet report: %d of %d customers failed.\n\n%s", failures, len(results), summary)
+	}
+	return summary, nil
+}
+
+func splitFirstWord(content string) (first string, rest string) {
+	if idx := strings.IndexByte(content, ' '); idx >= 0 {
+		return content[:idx], strings.TrimSpace(content[idx+1:])
+	}
+	return content, ""
 }
 
 func (s *Service) resolveSkill(content string) (*skills.Skill, string) {
-	firstWord, rest := content, ""
-	if idx := strings.IndexByte(content, ' '); idx >= 0 {
-		firstWord = content[:idx]
-		rest = strings.TrimSpace(content[idx+1:])
-	}
+	firstWord, rest := splitFirstWord(content)
 	return s.skillRegistry.Find(firstWord), rest
 }
 
@@ -196,7 +295,7 @@ func buildMcpContext(mcpServerUrl string) string {
 		mcpServerUrl)
 }
 
-func (s *Service) callClaude(apiKey, model, systemPrompt, userContent, mcpServerUrl string) (string, error) {
+func (s *Service) callClaude(apiKey, model, systemPrompt, userContent, mcpServerUrl, mcpToken string) (string, error) {
 	maxTokens := 1024
 	if mcpServerUrl != "" {
 		maxTokens = 4096
@@ -226,7 +325,7 @@ func (s *Service) callClaude(apiKey, model, systemPrompt, userContent, mcpServer
 				"type":                "url",
 				"url":                 mcpServerUrl,
 				"name":                mcpServerName,
-				"authorization_token": s.cfg.KubexMcpSettings.AuthorizationToken,
+				"authorization_token": mcpToken,
 			},
 		}
 		requestBody["tools"] = []map[string]any{

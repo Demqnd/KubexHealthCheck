@@ -23,6 +23,7 @@ Configure `appsettings.Development.json` (or environment variables — same `Sec
 - `ClaudeApiSettings:Model` — defaults to `claude-opus-5`.
 - `KubexMcpSettings:AuthorizationToken` — optional. Lets a bot command connect Claude to a Kubex MCP server for that one request — see "MCP-connected commands" below.
 - `DataDirectory` (optional) — where to store `webhook-routine.json`. Defaults to a `data/` folder next to the project.
+- `CustomersFile` (optional) — path to the fleet-report customer list. Defaults to `customers.json` next to the binary. See "Fleet reports" below.
 
 Run:
 
@@ -58,6 +59,27 @@ If a `command` sent to `POST /api/claude/command` contains a URL (e.g. `@KubexAI
 - Unlike the no-URL case below, a skill marked `dispatch:false` **is** usable here — that marker only blocks the plain word-dispatch path (which has no way to attach an MCP server); once a URL is already present and about to be attached, the thing the marker was guarding against no longer applies.
 
 The MCP server's own auth token comes from the server-side `KubexMcpSettings:AuthorizationToken` config (not from the message) — so a bot user only ever needs to include the MCP server's URL, never a credential, in their Teams message. This keeps the token out of Teams chat history and Power Automate run logs. Note this token is shared across *every* MCP URL a command supplies — there's no per-client credential lookup, so it's on you to make sure whatever's configured actually has access to every fleet you plan to query this way.
+
+### Fleet reports (multiple customers, one Teams message)
+
+The single-URL command above needs one shared `KubexMcpSettings:AuthorizationToken` that has to work against every MCP URL you supply — fine for one or two clients, not for querying many customers who each issued you their own token. `fleet <skillword> [instruction]` (e.g. `@KubexAI fleet kubex-cluster-count`) is the multi-customer version: it runs that skill once per customer listed in `backend/customers.json`, **each with its own MCP URL and its own auth token**, and combines every customer's answer into a single message — one post to Teams, not one per customer.
+
+`backend/customers.json` (gitignored — see `customers.json.example` for the shape):
+
+```json
+[
+  { "name": "sandbox", "mcpUrl": "https://sandbox-mcp.kubex.ai", "authorizationToken": "..." },
+  { "name": "sandboxuat", "mcpUrl": "https://sandboxuat-mcp.kubex.ai", "authorizationToken": "..." }
+]
+```
+
+Notes:
+
+- Customers are queried concurrently, capped at 5 at once (`fleetConcurrency` in `internal/claude/service.go`) so a 40-customer run doesn't fire 40 simultaneous requests at Anthropic.
+- If a customer's call fails (bad/expired token, wrong host, etc.), that one shows up as `<name>: FAILED - <reason>` in the combined message instead of failing the whole report — one bad token doesn't block everyone else's results.
+- Like the MCP-connected path above, `dispatch:false` doesn't block a skill here — an MCP server is being attached per customer either way.
+- The skill's own `<!-- model:... -->` override (if any) still applies, same as the single-URL path.
+- Right now each customer's answer is just joined line by line. Feeding all of them into one more Claude call to produce a single synthesized report (instead of a plain per-customer list) is the natural next step here — `RunFleet` in `internal/claude/service.go` is where that would slot in, without changing how the fan-out itself works.
 
 ### Word-dispatched skills
 

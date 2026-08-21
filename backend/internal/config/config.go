@@ -34,6 +34,13 @@ type Config struct {
 
 	DataDirectory   string `json:"DataDirectory"`
 	SkillsDirectory string `json:"SkillsDirectory"`
+
+	// Path to the JSON file listing fleet-report customers (name +
+	// per-customer MCP URL + auth token). Defaults to "customers.json"
+	// next to the running binary if unset. Real tokens live in this
+	// file, not in appsettings*.json, so it's gitignored — only
+	// customers.json.example is checked in.
+	CustomersFile string `json:"CustomersFile"`
 }
 
 func Load() (*Config, error) {
@@ -100,5 +107,8 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v, ok := os.LookupEnv("SkillsDirectory"); ok {
 		cfg.SkillsDirectory = v
+	}
+	if v, ok := os.LookupEnv("CustomersFile"); ok {
+		cfg.CustomersFile = v
 	}
 }

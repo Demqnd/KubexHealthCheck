@@ -45,7 +45,12 @@ func main() {
 	}
 	webhookSender := webhook.NewSender()
 
-	claudeService := claude.NewService(cfg, skillRegistry)
+	customersFile := cfg.CustomersFile
+	if customersFile == "" {
+		customersFile = "customers.json"
+	}
+
+	claudeService := claude.NewService(cfg, skillRegistry, customersFile)
 
 	server := api.NewServer(cfg, claudeService, webhookStore, webhookSender)
 
