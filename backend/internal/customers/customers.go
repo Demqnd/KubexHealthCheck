@@ -5,34 +5,74 @@
 package customers
 
 import (
-	"encoding/json"
+	"encoding/csv"
+	"net/url"
 	"os"
+	"strings"
 )
 
 type Customer struct {
-	Name               string `json:"name"`
-	McpUrl             string `json:"mcpUrl"`
-	AuthorizationToken string `json:"authorizationToken"`
+	// Derived from the URL's host (e.g. "sandbox-mcp.kubex.ai") — the CSV
+	// only carries the URL and the token, not a separate display name.
+	Name               string
+	McpUrl             string
+	AuthorizationToken string
 }
 
-// Load reads the customer list from path. A missing file is not an
-// error — it just means no customers are configured yet, matching how
-// SkillsDirectory behaves when missing.
+// Load reads the customer list from a CSV file: MCP URL in column A,
+// authorization token in column B. A header row is optional — if the
+// first row's column A doesn't look like a URL (doesn't start with
+// "http"), it's treated as a header and skipped; otherwise every row is
+// read as data.
 func Load(path string) ([]Customer, error) {
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	if len(data) == 0 {
-		return nil, nil
+	defer f.Close()
+
+	reader := csv.NewReader(f)
+	reader.FieldsPerRecord = -1 // tolerate ragged rows instead of hard-erroring
+	rows, err := reader.ReadAll()
+	if err != nil {
+		return nil, err
 	}
 
 	var list []Customer
-	if err := json.Unmarshal(data, &list); err != nil {
-		return nil, err
+	for i, row := range rows {
+		if len(row) < 1 {
+			continue
+		}
+		mcpUrl := strings.TrimSpace(row[0])
+		if mcpUrl == "" {
+			continue
+		}
+		if i == 0 && !strings.HasPrefix(strings.ToLower(mcpUrl), "http") {
+			// Looks like a header row (e.g. "url,authorizationToken") —
+			// skip it rather than treating it as a bogus customer.
+			continue
+		}
+
+		token := ""
+		if len(row) > 1 {
+			token = strings.TrimSpace(row[1])
+		}
+
+		list = append(list, Customer{
+			Name:               displayName(mcpUrl),
+			McpUrl:             mcpUrl,
+			AuthorizationToken: token,
+		})
 	}
 	return list, nil
+}
+
+func displayName(mcpUrl string) string {
+	if parsed, err := url.Parse(mcpUrl); err == nil && parsed.Host != "" {
+		return parsed.Host
+	}
+	return mcpUrl
 }

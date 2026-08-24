@@ -23,7 +23,7 @@ Configure `appsettings.Development.json` (or environment variables — same `Sec
 - `ClaudeApiSettings:Model` — defaults to `claude-opus-5`.
 - `KubexMcpSettings:AuthorizationToken` — optional. Lets a bot command connect Claude to a Kubex MCP server for that one request — see "MCP-connected commands" below.
 - `DataDirectory` (optional) — where to store `webhook-routine.json`. Defaults to a `data/` folder next to the project.
-- `CustomersFile` (optional) — path to the fleet-report customer list. Defaults to `customers.json` next to the binary. See "Fleet reports" below.
+- `CustomersFile` (optional) — path to the fleet-report customer list. Defaults to `customers.csv` next to the binary. See "Fleet reports" below.
 
 Run:
 
@@ -62,16 +62,17 @@ The MCP server's own auth token comes from the server-side `KubexMcpSettings:Aut
 
 ### Fleet reports (multiple customers, one Teams message)
 
-The single-URL command above needs one shared `KubexMcpSettings:AuthorizationToken` that has to work against every MCP URL you supply — fine for one or two clients, not for querying many customers who each issued you their own token. `fleet <skillword> [instruction]` (e.g. `@KubexAI fleet kubex-cluster-count`) is the multi-customer version: it runs that skill once per customer listed in `backend/customers.json`, **each with its own MCP URL and its own auth token**, and combines every customer's answer into a single message — one post to Teams, not one per customer.
+The single-URL command above needs one shared `KubexMcpSettings:AuthorizationToken` that has to work against every MCP URL you supply — fine for one or two clients, not for querying many customers who each issued you their own token. `fleet <skillword> [instruction]` (e.g. `@KubexAI fleet kubex-cluster-count`) is the multi-customer version: it runs that skill once per customer listed in `backend/customers.csv`, **each with its own MCP URL and its own auth token**, and combines every customer's answer into a single message — one post to Teams, not one per customer.
 
-`backend/customers.json` (gitignored — see `customers.json.example` for the shape):
+`backend/customers.csv` (gitignored — see `customers.csv.example` for the shape) is a plain two-column CSV: MCP URL in column A, authorization token in column B.
 
-```json
-[
-  { "name": "sandbox", "mcpUrl": "https://sandbox-mcp.kubex.ai", "authorizationToken": "..." },
-  { "name": "sandboxuat", "mcpUrl": "https://sandboxuat-mcp.kubex.ai", "authorizationToken": "..." }
-]
+```csv
+url,authorizationToken
+https://sandbox-mcp.kubex.ai,your-real-token-here
+https://sandboxuat-mcp.kubex.ai,your-other-real-token-here
 ```
+
+The header row is optional — it's detected and skipped automatically (a first column that doesn't start with `http` is treated as a header), so the file works with or without one. There's no separate name column; each customer's display name in the combined report is just derived from the URL's host (e.g. `sandbox-mcp.kubex.ai: 14 clusters connected.`).
 
 Notes:
 
