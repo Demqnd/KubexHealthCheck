@@ -7,7 +7,7 @@ Given a client identifier (a Kubex MCP hostname like `sandboxuat-mcp.kubex.ai`, 
 1. **Cluster count** — how many clusters are under this connection.
 2. **Connection status** — is every cluster in a healthy state, or does something need action?
 3. **Data freshness** — has every cluster collected data in the last 24 hours?
-4. **Version drift** — is the fleet on one forwarder/Prometheus version, or is there an oldest version lagging behind?
+4. **Version drift** — is the fleet on one forwarder/Prometheus/Kubernetes version, or is there an oldest version lagging behind?
 
 The parameter is designed to be swappable — the same steps below should work whether the client this run is for is `sandboxuat-mcp.kubex.ai`, `fedex-mcp.kubex.ai`, some other Kubex MCP host, or a short client name, as long as that client is already connected.
 
@@ -42,7 +42,8 @@ To resolve the parameter to an actual connector, don't just assume — look it u
 5. **Version drift check:** keep this to the oldest-version headline, not a full version-by-version breakdown.
    - For `forwarderVersion`: if every cluster is on the same version, say "all N clusters on forwarder vX." If not, name the oldest version present and how many clusters are on it, e.g. "oldest forwarder version is vX, running on M of N clusters."
    - For `prometheusVersion`: same pattern — "all N clusters on Prometheus vX" if uniform, otherwise "oldest Prometheus version is vX, running on M of N clusters."
-   - Don't list every version/cluster combination — just the oldest one and its count. If the user has told Claude what the current/latest version is, you can additionally say how far behind that oldest version is. Don't assume what "latest" is if it hasn't been provided.
+   - For `kubernetesVersion`: same pattern again — "all N clusters on Kubernetes vX" if uniform, otherwise "oldest Kubernetes version is vX, running on M of N clusters."
+   - Don't list every version/cluster combination — just the oldest one and its count, per version type. If the user has told Claude what the current/latest version is, you can additionally say how far behind that oldest version is. Don't assume what "latest" is if it hasn't been provided.
 6. **Summary:** always lead with the cluster count, the status verdict, and the 24-hour freshness verdict — these three are the headline and shouldn't be held back for a "detailed" ask. Version drift follows in the oldest-version form described above unless the user wants the full per-cluster table.
 7. **Deliver the result — this step depends on which context you're running in:**
    - **Interactively (Claude Code / Claude Desktop), with local file access:** write the result as JSON to `kubex-health-latest.json` inside `C:\Users\conno\Claude Cowork` (connect that folder via `mcp__cowork__request_cowork_directory` first if it isn't already mounted). This is picked up by a separate local script that posts a Teams/Power Automate notification — your job stops at writing an accurate file. Use this exact shape:
@@ -60,6 +61,8 @@ To resolve the parameter to an actual connector, don't just assume — look it u
        "forwarderOldestCount": 15,
        "prometheusOldestVersion": "2.46.0",
        "prometheusOldestCount": 1,
+       "kubernetesOldestVersion": "1.28",
+       "kubernetesOldestCount": 3,
        "summary": "<the one-paragraph plain-text summary shown in chat>"
      }
      ```
@@ -69,7 +72,7 @@ To resolve the parameter to an actual connector, don't just assume — look it u
 
 ## Output style
 
-One tight paragraph, plain text — no markdown formatting (no headers, bullets, or bold), since this is posted directly as a Teams message. Lead with: cluster count → status (all healthy, or which need action) → freshness (all current, or which need action) → version drift (oldest version + count, or "all on this version"). No mention of which connector was matched unless there was an ambiguity worth flagging. Don't repeat the full per-cluster table beyond what's needed to name the clusters that need action. If you wrote a local result file (interactive context only), mention it briefly, e.g. "(saved to kubex-health-latest.json)" — don't dwell on it.
+One tight paragraph, plain text — no markdown formatting (no headers, bullets, or bold), since this is posted directly as a Teams message. Lead with: cluster count → status (all healthy, or which need action) → freshness (all current, or which need action) → version drift (forwarder, Prometheus, and Kubernetes — each as oldest version + count, or "all on this version"). No mention of which connector was matched unless there was an ambiguity worth flagging. Don't repeat the full per-cluster table beyond what's needed to name the clusters that need action. If you wrote a local result file (interactive context only), mention it briefly, e.g. "(saved to kubex-health-latest.json)" — don't dwell on it.
 
 ## Example invocations
 
