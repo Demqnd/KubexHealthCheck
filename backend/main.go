@@ -47,7 +47,7 @@ func main() {
 
 	customersFile := cfg.CustomersFile
 	if customersFile == "" {
-		customersFile = "customers.csv"
+		customersFile = "customers.json"
 	}
 
 	claudeService := claude.NewService(cfg, skillRegistry, customersFile)

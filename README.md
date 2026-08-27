@@ -23,7 +23,7 @@ Configure `appsettings.Development.json` (or environment variables — same `Sec
 - `ClaudeApiSettings:Model` — defaults to `claude-opus-5`.
 - `KubexMcpSettings:AuthorizationToken` — optional. Lets a bot command connect Claude to a Kubex MCP server for that one request — see "MCP-connected commands" below.
 - `DataDirectory` (optional) — where to store `webhook-routine.json`. Defaults to a `data/` folder next to the project.
-- `CustomersFile` (optional) — path to the fleet-report customer list. Defaults to `customers.csv` next to the binary. See "Fleet reports" below.
+- `CustomersFile` (optional) — path to the fleet-report customer list. Defaults to `customers.json` next to the binary. See "Fleet reports" below.
 
 Run:
 
@@ -62,24 +62,25 @@ The MCP server's own auth token comes from the server-side `KubexMcpSettings:Aut
 
 ### Fleet reports (multiple customers, one Teams message)
 
-The single-URL command above needs one shared `KubexMcpSettings:AuthorizationToken` that has to work against every MCP URL you supply — fine for one or two clients, not for querying many customers who each issued you their own credentials. `fleet <skillword> [instruction]` (e.g. `@KubexAI fleet kubex-cluster-count`) is the multi-customer version: it runs that skill once per customer listed in `backend/customers.csv`, **each with its own MCP URL and its own login**, and combines every customer's answer into a single message — one post to Teams, not one per customer.
+The single-URL command above needs one shared `KubexMcpSettings:AuthorizationToken` that has to work against every MCP URL you supply — fine for one or two clients, not for querying many customers who each issued you their own token. `fleet <skillword> [instruction]` (e.g. `@KubexAI fleet kubex-cluster-count`) is the multi-customer version: it runs that skill once per customer listed in `backend/customers.json`, **each with its own MCP URL and its own auth token**, and combines every customer's answer into a single message — one post to Teams, not one per customer.
 
-`backend/customers.csv` (gitignored — see `customers.csv.example` for the shape) is a plain three-column CSV: MCP URL in column A, username in column B, password in column C.
+`backend/customers.json` (gitignored — see `customers.json.example` for the shape):
 
-```csv
-url,username,password
-https://sandbox-mcp.kubex.ai,your-username,your-password
-https://sandboxuat-mcp.kubex.ai,your-other-username,your-other-password
+```json
+[
+  { "name": "sandbox", "mcpUrl": "https://sandbox-mcp.kubex.ai", "authorizationToken": "..." },
+  { "name": "sandboxuat", "mcpUrl": "https://sandboxuat-mcp.kubex.ai", "authorizationToken": "..." }
+]
 ```
 
-The header row is optional — it's detected and skipped automatically (a first column that doesn't start with `http` is treated as a header), so the file works with or without one. There's no separate name column; each customer's display name in the combined report is just derived from the URL's host (e.g. `sandbox-mcp.kubex.ai: 14 clusters connected.`).
+Each token has to be obtained manually right now (e.g. via the MCP Inspector — see the Setup section) and pasted in here per customer; it'll expire and need replacing periodically, same as `KubexMcpSettings:AuthorizationToken` does.
 
-**Why username/password instead of a token directly:** manually-obtained MCP OAuth tokens expire quickly and require an interactive browser flow to refresh — completely impractical across many customers. Instead, `internal/kubexauth` signs in with each customer's username/password via Kubex's REST login endpoint (`POST {url}/api/v2/authorize`, the same one the old REST-based health check used) to get a bearer token automatically, and caches it (~55 minutes) so a run doesn't re-authenticate on every call. This assumes the token that endpoint returns is accepted by the MCP server itself as a bearer token — that's a genuine assumption, not a documented guarantee, so verify it actually works end-to-end with real credentials rather than taking it on faith.
+**Automating that sign-in is a work in progress, not wired in yet.** `internal/kubexauth` has a username/password sign-in path (calls Kubex's REST login, `POST {apiUrl}/api/v2/authorize`, to get a bearer token automatically instead of a manually-obtained one) — built and tested against the real endpoint, but not currently used by `RunFleet`. Two things are blocking turning it on: it needs a Kubex account with the "API-enabled" flag set (confirmed as a real, separate requirement in Kubex's own docs — a plain active-user login isn't enough), and even once that's sorted, it's still unverified whether the token that login returns is actually accepted by the MCP server itself as a bearer token, since the MCP server enforces its own separate OAuth 2.1 flow. Once both are confirmed, swapping `RunFleet` back to sign in per customer instead of reading a static token is a small, contained change.
 
 Notes:
 
 - Customers are queried concurrently, capped at 5 at once (`fleetConcurrency` in `internal/claude/service.go`) so a 40-customer run doesn't fire 40 simultaneous requests at Anthropic.
-- If a customer's sign-in or Claude call fails, that one shows up as `<name>: FAILED - <reason>` in the combined message instead of failing the whole report — one bad login doesn't block everyone else's results.
+- If a customer's call fails (bad/expired token, wrong host, etc.), that one shows up as `<name>: FAILED - <reason>` in the combined message instead of failing the whole report — one bad token doesn't block everyone else's results.
 - Like the MCP-connected path above, `dispatch:false` doesn't block a skill here — an MCP server is being attached per customer either way.
 - The skill's own `<!-- model:... -->` override (if any) still applies, same as the single-URL path.
 - Right now each customer's answer is just joined line by line. Feeding all of them into one more Claude call to produce a single synthesized report (instead of a plain per-customer list) is the natural next step here — `RunFleet` in `internal/claude/service.go` is where that would slot in, without changing how the fan-out itself works.

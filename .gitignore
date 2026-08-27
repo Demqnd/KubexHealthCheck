@@ -2,4 +2,4 @@
 /backend/khc
 appsettings.*.local.json
 backend/data/
-backend/customers.csv
+backend/customers.json

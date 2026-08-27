@@ -62,7 +62,7 @@ var (
 	leadingMentionPattern = regexp.MustCompile(`^@\S+\s*`)
 
 	// "fleet <skillword> [instruction]" runs that skill against every
-	// customer in customers.csv (each with its own MCP URL + login) and
+	// customer in customers.json (each with its own MCP URL + token) and
 	// combines all their answers into one message, instead of the usual
 	// single-URL-per-command path.
 	fleetPrefixPattern = regexp.MustCompile(`(?i)^fleet\s+`)
@@ -118,10 +118,10 @@ func (s *Service) RunCommand(command string) (string, error) {
 	}
 
 	// "fleet <skillword> [instruction]" — run that skill against every
-	// customer in customers.csv, each with its own MCP URL + login, and
+	// customer in customers.json, each with its own MCP URL + token, and
 	// combine all their answers into one message. Checked before the
 	// single-URL path below since a fleet command has no URL in it at
-	// all — the URLs come from customers.csv instead.
+	// all — the URLs come from customers.json instead.
 	if fleetRest := fleetPrefixPattern.ReplaceAllString(content, ""); fleetRest != content {
 		skillWord, instruction := splitFirstWord(fleetRest)
 		return s.RunFleet(apiKey, model, skillWord, instruction)
@@ -172,12 +172,17 @@ func (s *Service) RunCommand(command string) (string, error) {
 	return s.callClaude(apiKey, model, askSystemPrompt, content, "", "")
 }
 
-// RunFleet runs skillWord against every customer in customers.csv, each
-// with its own MCP URL and login (unlike the single shared
-// KubexMcpSettings token used by the single-URL command path) — each
-// customer's own username/password is used to sign in for a fresh token
-// via kubexauth before calling Claude — and combines every customer's
-// one-line answer into a single message.
+// RunFleet runs skillWord against every customer in customers.json, each
+// with its own MCP URL and auth token (unlike the single shared
+// KubexMcpSettings token used by the single-URL command path), and
+// combines every customer's one-line answer into a single message.
+//
+// The token here is read directly from customers.json (manually
+// obtained, e.g. via the MCP Inspector) rather than signed in for
+// automatically — internal/kubexauth has a username/password sign-in
+// path ready to swap in here once Kubex account setup (the
+// "API-enabled" flag) allows testing whether it actually works for MCP
+// auth, not just Kubex's plain REST API.
 //
 // This is the extension point for the "feed all the info back into
 // Claude for a final combined output" idea: right now the per-customer
@@ -219,14 +224,8 @@ func (s *Service) RunFleet(apiKey, model, skillWord, instruction string) (string
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			mcpToken, err := s.kubexAuth.Token(c.McpUrl, c.Username, c.Password)
-			if err != nil {
-				results[i] = outcome{name: c.Name, err: fmt.Errorf("sign-in failed: %w", err)}
-				return
-			}
-
 			input := dateContext + buildMcpContext(c.McpUrl) + orDefault(instruction, "Run this skill.")
-			text, err := s.callClaude(apiKey, skillModel, skill.Instructions, input, c.McpUrl, mcpToken)
+			text, err := s.callClaude(apiKey, skillModel, skill.Instructions, input, c.McpUrl, c.AuthorizationToken)
 			results[i] = outcome{name: c.Name, text: strings.TrimSpace(text), err: err}
 		}(i, customer)
 	}
