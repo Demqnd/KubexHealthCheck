@@ -1,0 +1,3 @@
+name,mcpUrl,authorizationToken
+sandbox,https://sandbox-mcp.kubex.ai,
+sandboxuat,https://sandboxuat-mcp.kubex.ai,
