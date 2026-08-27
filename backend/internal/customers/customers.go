@@ -1,7 +1,8 @@
 // Package customers loads the list of Kubex clients this service can run
-// a fleet report across — each with its own MCP URL and its own
-// authorization token (unlike the single shared KubexMcpSettings token
-// used for a one-off "@KubexAI <url> <skill>" command).
+// a fleet report across — each with its own MCP URL and its own login
+// (username/password), used to sign in for a fresh token per customer
+// instead of relying on a manually-obtained MCP OAuth token that expires
+// quickly.
 package customers
 
 import (
@@ -13,17 +14,18 @@ import (
 
 type Customer struct {
 	// Derived from the URL's host (e.g. "sandbox-mcp.kubex.ai") — the CSV
-	// only carries the URL and the token, not a separate display name.
-	Name               string
-	McpUrl             string
-	AuthorizationToken string
+	// only carries the URL and the login, not a separate display name.
+	Name     string
+	McpUrl   string
+	Username string
+	Password string
 }
 
 // Load reads the customer list from a CSV file: MCP URL in column A,
-// authorization token in column B. A header row is optional — if the
-// first row's column A doesn't look like a URL (doesn't start with
-// "http"), it's treated as a header and skipped; otherwise every row is
-// read as data.
+// username in column B, password in column C. A header row is optional
+// — if the first row's column A doesn't look like a URL (doesn't start
+// with "http"), it's treated as a header and skipped; otherwise every
+// row is read as data.
 func Load(path string) ([]Customer, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -51,20 +53,25 @@ func Load(path string) ([]Customer, error) {
 			continue
 		}
 		if i == 0 && !strings.HasPrefix(strings.ToLower(mcpUrl), "http") {
-			// Looks like a header row (e.g. "url,authorizationToken") —
+			// Looks like a header row (e.g. "url,username,password") —
 			// skip it rather than treating it as a bogus customer.
 			continue
 		}
 
-		token := ""
+		username := ""
 		if len(row) > 1 {
-			token = strings.TrimSpace(row[1])
+			username = strings.TrimSpace(row[1])
+		}
+		password := ""
+		if len(row) > 2 {
+			password = strings.TrimSpace(row[2])
 		}
 
 		list = append(list, Customer{
-			Name:               displayName(mcpUrl),
-			McpUrl:             mcpUrl,
-			AuthorizationToken: token,
+			Name:     displayName(mcpUrl),
+			McpUrl:   mcpUrl,
+			Username: username,
+			Password: password,
 		})
 	}
 	return list, nil

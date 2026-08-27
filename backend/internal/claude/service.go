@@ -16,6 +16,7 @@ import (
 
 	"kubexhealthcheck/internal/config"
 	"kubexhealthcheck/internal/customers"
+	"kubexhealthcheck/internal/kubexauth"
 	"kubexhealthcheck/internal/skills"
 )
 
@@ -61,7 +62,7 @@ var (
 	leadingMentionPattern = regexp.MustCompile(`^@\S+\s*`)
 
 	// "fleet <skillword> [instruction]" runs that skill against every
-	// customer in customers.json (each with its own MCP URL + token) and
+	// customer in customers.csv (each with its own MCP URL + login) and
 	// combines all their answers into one message, instead of the usual
 	// single-URL-per-command path.
 	fleetPrefixPattern = regexp.MustCompile(`(?i)^fleet\s+`)
@@ -72,6 +73,7 @@ type Service struct {
 	skillRegistry *skills.Registry
 	customersFile string
 	httpClient    *http.Client
+	kubexAuth     *kubexauth.Cache
 }
 
 func NewService(cfg *config.Config, skillRegistry *skills.Registry, customersFile string) *Service {
@@ -80,6 +82,7 @@ func NewService(cfg *config.Config, skillRegistry *skills.Registry, customersFil
 		skillRegistry: skillRegistry,
 		customersFile: customersFile,
 		httpClient:    &http.Client{Timeout: 30 * time.Second},
+		kubexAuth:     kubexauth.NewCache(),
 	}
 }
 
@@ -115,10 +118,10 @@ func (s *Service) RunCommand(command string) (string, error) {
 	}
 
 	// "fleet <skillword> [instruction]" — run that skill against every
-	// customer in customers.json, each with its own MCP URL + token, and
+	// customer in customers.csv, each with its own MCP URL + login, and
 	// combine all their answers into one message. Checked before the
 	// single-URL path below since a fleet command has no URL in it at
-	// all — the URLs come from customers.json instead.
+	// all — the URLs come from customers.csv instead.
 	if fleetRest := fleetPrefixPattern.ReplaceAllString(content, ""); fleetRest != content {
 		skillWord, instruction := splitFirstWord(fleetRest)
 		return s.RunFleet(apiKey, model, skillWord, instruction)
@@ -169,10 +172,12 @@ func (s *Service) RunCommand(command string) (string, error) {
 	return s.callClaude(apiKey, model, askSystemPrompt, content, "", "")
 }
 
-// RunFleet runs skillWord against every customer in customers.json,
-// each with its own MCP URL and auth token (unlike the single shared
-// KubexMcpSettings token used by the single-URL command path), and
-// combines every customer's one-line answer into a single message.
+// RunFleet runs skillWord against every customer in customers.csv, each
+// with its own MCP URL and login (unlike the single shared
+// KubexMcpSettings token used by the single-URL command path) — each
+// customer's own username/password is used to sign in for a fresh token
+// via kubexauth before calling Claude — and combines every customer's
+// one-line answer into a single message.
 //
 // This is the extension point for the "feed all the info back into
 // Claude for a final combined output" idea: right now the per-customer
@@ -214,8 +219,14 @@ func (s *Service) RunFleet(apiKey, model, skillWord, instruction string) (string
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
+			mcpToken, err := s.kubexAuth.Token(c.McpUrl, c.Username, c.Password)
+			if err != nil {
+				results[i] = outcome{name: c.Name, err: fmt.Errorf("sign-in failed: %w", err)}
+				return
+			}
+
 			input := dateContext + buildMcpContext(c.McpUrl) + orDefault(instruction, "Run this skill.")
-			text, err := s.callClaude(apiKey, skillModel, skill.Instructions, input, c.McpUrl, c.AuthorizationToken)
+			text, err := s.callClaude(apiKey, skillModel, skill.Instructions, input, c.McpUrl, mcpToken)
 			results[i] = outcome{name: c.Name, text: strings.TrimSpace(text), err: err}
 		}(i, customer)
 	}
