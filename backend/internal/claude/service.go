@@ -99,16 +99,6 @@ func (s *Service) Ask(apiKey, question string) (string, error) {
 }
 
 func (s *Service) RunCommand(command string) (string, error) {
-	apiKey := s.cfg.ClaudeApiSettings.ApiKey
-	if strings.TrimSpace(apiKey) == "" {
-		return "", fmt.Errorf("ClaudeApiSettings:ApiKey is not configured")
-	}
-
-	model := s.cfg.ClaudeApiSettings.Model
-	if strings.TrimSpace(model) == "" {
-		model = defaultModel
-	}
-
 	// Drop a leading "@KubexAI" (or any @-mention) before anything below
 	// looks at the command's first word — Teams delivers the mention as
 	// literal text, and it would otherwise shadow a skill word.
@@ -123,11 +113,19 @@ func (s *Service) RunCommand(command string) (string, error) {
 	// single-URL path below since a fleet command has no URL in it at
 	// all — the URLs come from customers.csv instead.
 	if fleetRest := fleetPrefixPattern.ReplaceAllString(content, ""); fleetRest != content {
+		apiKey, model, err := s.anthropicCreds()
+		if err != nil {
+			return "", err
+		}
 		skillWord, instruction := splitFirstWord(fleetRest)
 		return s.RunFleet(apiKey, model, skillWord, instruction)
 	}
 
 	if loc := mcpUrlPattern.FindStringIndex(content); loc != nil {
+		apiKey, model, err := s.anthropicCreds()
+		if err != nil {
+			return "", err
+		}
 		mcpServerUrl := content[loc[0]:loc[1]]
 		instruction := strings.TrimSpace(content[:loc[0]] + content[loc[1]:])
 		mcpToken := s.cfg.KubexMcpSettings.AuthorizationToken
@@ -284,6 +282,23 @@ func orDefault(value, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+// anthropicCreds is only needed by the branches of RunCommand that still
+// call Anthropic directly (fleet, single-URL MCP commands) — the plain
+// Bedrock branches don't touch ClaudeApiSettings at all, so this check
+// must not run unconditionally for every command.
+func (s *Service) anthropicCreds() (apiKey, model string, err error) {
+	apiKey = s.cfg.ClaudeApiSettings.ApiKey
+	if strings.TrimSpace(apiKey) == "" {
+		return "", "", fmt.Errorf("ClaudeApiSettings:ApiKey is not configured")
+	}
+
+	model = s.cfg.ClaudeApiSettings.Model
+	if strings.TrimSpace(model) == "" {
+		model = defaultModel
+	}
+	return apiKey, model, nil
 }
 
 // Claude has no clock of its own — skills that need "today" (like
