@@ -66,6 +66,12 @@ var (
 	// combines all their answers into one message, instead of the usual
 	// single-URL-per-command path.
 	fleetPrefixPattern = regexp.MustCompile(`(?i)^fleet\s+`)
+
+	// "bedrock <url> <skill> [instruction]" is the Bedrock equivalent of
+	// the plain "<url> <skill>" Anthropic path below — Bedrock has no MCP
+	// connector, so this routes through callBedrockWithMcpTool instead of
+	// callClaude, using the same shared KubexMcpSettings token.
+	bedrockPrefixPattern = regexp.MustCompile(`(?i)^bedrock\s+`)
 )
 
 type Service struct {
@@ -119,6 +125,37 @@ func (s *Service) RunCommand(command string) (string, error) {
 		}
 		skillWord, instruction := splitFirstWord(fleetRest)
 		return s.RunFleet(apiKey, model, skillWord, instruction)
+	}
+
+	// "bedrock <url> <skill> [instruction]" — the Bedrock equivalent of
+	// the plain single-URL Anthropic path just below. Checked first since
+	// the URL-only branch below would otherwise treat the leading
+	// "bedrock" word as free-form instruction text rather than a routing
+	// prefix.
+	if bedrockRest := bedrockPrefixPattern.ReplaceAllString(content, ""); bedrockRest != content {
+		if loc := mcpUrlPattern.FindStringIndex(bedrockRest); loc != nil {
+			mcpServerUrl := bedrockRest[loc[0]:loc[1]]
+			instruction := strings.TrimSpace(bedrockRest[:loc[0]] + bedrockRest[loc[1]:])
+			mcpToken := s.cfg.KubexMcpSettings.AuthorizationToken
+
+			mcpSkill, mcpRest := s.resolveSkill(instruction)
+			if mcpSkill != nil {
+				mcpSkillInput := buildDateContext() + buildMcpContext(mcpServerUrl) + orDefault(mcpRest, "Run this skill.")
+				return s.callBedrockWithMcpTool(mcpSkill.Instructions, mcpSkillInput, mcpServerUrl, mcpToken, requiredMcpToolName)
+			}
+
+			// No recognized skill word after the URL — default to
+			// skills/kubex-health-check, mirroring the Anthropic path.
+			defaultInstruction := buildMcpContext(mcpServerUrl) + orDefault(instruction, "Check the fleet's health.")
+			if defaultSkill := s.skillRegistry.Find("kubex-health-check"); defaultSkill != nil {
+				return s.callBedrockWithMcpTool(
+					buildDateContext()+defaultSkill.Instructions, defaultInstruction, mcpServerUrl, mcpToken, requiredMcpToolName)
+			}
+
+			return s.callBedrockWithMcpTool(fallbackKubexMcpSystemPrompt, defaultInstruction, mcpServerUrl, mcpToken, requiredMcpToolName)
+		}
+
+		return "", fmt.Errorf("a \"bedrock\" command needs an MCP server URL, e.g. \"bedrock https://sandbox-mcp.kubex.ai/... kubex-health-check\"")
 	}
 
 	if loc := mcpUrlPattern.FindStringIndex(content); loc != nil {
