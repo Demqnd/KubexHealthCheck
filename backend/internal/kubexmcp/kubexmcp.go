@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -184,10 +185,60 @@ func (c *Client) post(url, token, sessionId string, body rpcRequest) (*rpcRespon
 		return &rpcResponse{}, respSessionId, nil
 	}
 
+	responseBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, respSessionId, fmt.Errorf("failed to read MCP response: %w", err)
+	}
+
+	jsonBytes, err := sseOrPlainJSON(resp.Header.Get("Content-Type"), responseBytes)
+	if err != nil {
+		return nil, respSessionId, fmt.Errorf("failed to extract MCP response payload: %w", err)
+	}
+
 	var parsed rpcResponse
-	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+	if err := json.Unmarshal(jsonBytes, &parsed); err != nil {
 		return nil, respSessionId, fmt.Errorf("failed to decode MCP response: %w", err)
 	}
 
 	return &parsed, respSessionId, nil
+}
+
+// sseOrPlainJSON returns the JSON-RPC payload from an MCP response body.
+// Per the Streamable HTTP transport spec, a server may answer a POST
+// either as plain "application/json" or as Server-Sent Events — one
+// "message" event per response, shaped like "event: message\ndata:
+// {...}\n\n". Kubex's MCP server uses the SSE form; decoding that framing
+// directly as JSON fails, since "event: message\ndata: " isn't JSON at
+// all until the "data:" field is pulled back out.
+func sseOrPlainJSON(contentType string, body []byte) ([]byte, error) {
+	if !strings.Contains(strings.ToLower(contentType), "text/event-stream") {
+		return body, nil
+	}
+
+	// A POST response carries exactly one JSON-RPC message for the
+	// request it answers, so the last complete "data:" block in the
+	// stream (multiple "data:" lines within one event are joined per the
+	// SSE spec) is the one to use.
+	var lastData, current []string
+	for _, line := range strings.Split(string(body), "\n") {
+		line = strings.TrimRight(line, "\r")
+		if line == "" {
+			if len(current) > 0 {
+				lastData = current
+				current = nil
+			}
+			continue
+		}
+		if data, ok := strings.CutPrefix(line, "data:"); ok {
+			current = append(current, strings.TrimPrefix(data, " "))
+		}
+	}
+	if len(current) > 0 {
+		lastData = current
+	}
+
+	if len(lastData) == 0 {
+		return nil, fmt.Errorf("no \"data:\" field found in SSE response")
+	}
+	return []byte(strings.Join(lastData, "\n")), nil
 }
