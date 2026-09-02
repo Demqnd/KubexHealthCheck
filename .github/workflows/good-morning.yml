@@ -27,6 +27,9 @@ jobs:
           ApiKeySettings__Key: ${{ secrets.API_KEY }}
           ClaudeApiSettings__ApiKey: ${{ secrets.CLAUDE_API_KEY }}
           KubexMcpSettings__AuthorizationToken: ${{ secrets.KUBEX_MCP_TOKEN }}
+          BedrockSettings__ApiKey: ${{ secrets.BEDROCK_API_KEY }}
+          BedrockSettings__Region: ${{ secrets.BEDROCK_REGION }}
+          BedrockSettings__ModelId: ${{ secrets.BEDROCK_MODEL_ID }}
         run: |
           nohup ./kubexhealthcheck > backend.log 2>&1 &
           for i in $(seq 1 30); do

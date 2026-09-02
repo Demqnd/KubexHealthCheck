@@ -163,13 +163,21 @@ func (s *Service) RunCommand(command string) (string, error) {
 	// (skills/<name>/SKILL.md). Skills marked dispatch:false are excluded
 	// here since this path has no way to attach an MCP server for them.
 	// Otherwise fall back to a plain free-form question.
+	//
+	// Both branches here go through Bedrock, not Anthropic directly —
+	// neither one attaches an MCP server, so there's nothing that needs
+	// the MCP connector feature Bedrock doesn't support. A skill's own
+	// "<!-- model:... -->" override (an Anthropic model name) doesn't
+	// apply on this path, since Bedrock uses a completely different
+	// model-ID namespace — BedrockSettings:ModelId is used for every
+	// call here instead.
 	skill, rest := s.resolveSkill(content)
 	if skill != nil && skill.GenericallyDispatchable {
 		skillInput := buildDateContext() + orDefault(rest, "Run this skill.")
-		return s.callClaude(apiKey, resolveModel(skill, model), skill.Instructions, skillInput, "", "")
+		return s.callBedrock(skill.Instructions, skillInput)
 	}
 
-	return s.callClaude(apiKey, model, askSystemPrompt, content, "", "")
+	return s.callBedrock(askSystemPrompt, content)
 }
 
 // RunFleet runs skillWord against every customer in customers.csv, each

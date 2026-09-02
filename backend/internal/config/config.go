@@ -28,6 +28,23 @@ type Config struct {
 		Model  string `json:"Model"`
 	} `json:"ClaudeApiSettings"`
 
+	// Bedrock is only used by RunCommand's plain (non-MCP) paths right
+	// now — a skill or command that attaches an MCP server (single-URL
+	// commands, "fleet") keeps using ClaudeApiSettings/Anthropic's direct
+	// API, since AWS Bedrock doesn't support Anthropic's MCP connector
+	// feature at all. See internal/claude/bedrock.go.
+	BedrockSettings struct {
+		// The Bedrock API key (bearer-token style, "Authorization:
+		// Bearer <key>") — not an Anthropic key, not IAM credentials.
+		ApiKey string `json:"ApiKey"`
+		// AWS region the model is enabled in, e.g. "us-east-1".
+		Region string `json:"Region"`
+		// The Bedrock model ID (or cross-region inference profile ID),
+		// e.g. "us.anthropic.claude-opus-4-5-20251101-v1:0" — this is
+		// AWS's own naming, not Anthropic's model name.
+		ModelId string `json:"ModelId"`
+	} `json:"BedrockSettings"`
+
 	KubexMcpSettings struct {
 		AuthorizationToken string `json:"AuthorizationToken"`
 	} `json:"KubexMcpSettings"`
@@ -101,6 +118,15 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v, ok := os.LookupEnv("KubexMcpSettings__AuthorizationToken"); ok {
 		cfg.KubexMcpSettings.AuthorizationToken = v
+	}
+	if v, ok := os.LookupEnv("BedrockSettings__ApiKey"); ok {
+		cfg.BedrockSettings.ApiKey = v
+	}
+	if v, ok := os.LookupEnv("BedrockSettings__Region"); ok {
+		cfg.BedrockSettings.Region = v
+	}
+	if v, ok := os.LookupEnv("BedrockSettings__ModelId"); ok {
+		cfg.BedrockSettings.ModelId = v
 	}
 	if v, ok := os.LookupEnv("DataDirectory"); ok {
 		cfg.DataDirectory = v
