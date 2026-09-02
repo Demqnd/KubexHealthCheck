@@ -19,6 +19,19 @@ func main() {
 		log.Fatalf("failed to load config: %v", err)
 	}
 
+	// Diagnostic only — never logs the token value itself, just whether
+	// config.Load() actually found one. appsettings*.json is read
+	// relative to the process's current working directory, so a wrong
+	// cwd (or wrong ASPNETCORE_ENVIRONMENT) silently loads no file at
+	// all rather than erroring, which looks identical to "empty token"
+	// from the outside.
+	if wd, err := os.Getwd(); err == nil {
+		log.Printf(
+			"Config loaded from cwd=%s env=%s: KubexMcpSettings.AuthorizationToken set=%v (len=%d)",
+			wd, envOrDefault("ASPNETCORE_ENVIRONMENT", "Production"),
+			cfg.KubexMcpSettings.AuthorizationToken != "", len(cfg.KubexMcpSettings.AuthorizationToken))
+	}
+
 	skillsDirectory := cfg.SkillsDirectory
 	if skillsDirectory == "" {
 		// The process runs from backend/ (same as every workflow in
@@ -64,6 +77,13 @@ func main() {
 	if err := http.ListenAndServe(addr, server); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func envOrDefault(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }
 
 // ASPNETCORE_URLS (kept as the env var name for parity with the old
