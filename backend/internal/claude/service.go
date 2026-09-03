@@ -133,6 +133,14 @@ func (s *Service) RunCommand(command string) (string, error) {
 	// "bedrock" word as free-form instruction text rather than a routing
 	// prefix.
 	if bedrockRest := bedrockPrefixPattern.ReplaceAllString(content, ""); bedrockRest != content {
+		// "bedrock fleet <skillword> [instruction]" — the Bedrock
+		// equivalent of the plain "fleet" path above, checked first for
+		// the same reason: no URL to look for at all.
+		if fleetRest := fleetPrefixPattern.ReplaceAllString(bedrockRest, ""); fleetRest != bedrockRest {
+			skillWord, instruction := splitFirstWord(fleetRest)
+			return s.RunFleetBedrock(skillWord, instruction)
+		}
+
 		if loc := mcpUrlPattern.FindStringIndex(bedrockRest); loc != nil {
 			mcpServerUrl := bedrockRest[loc[0]:loc[1]]
 			instruction := strings.TrimSpace(bedrockRest[:loc[0]] + bedrockRest[loc[1]:])
@@ -155,7 +163,9 @@ func (s *Service) RunCommand(command string) (string, error) {
 			return s.callBedrockWithMcpTool(fallbackKubexMcpSystemPrompt, defaultInstruction, mcpServerUrl, mcpToken, requiredMcpToolName)
 		}
 
-		return "", fmt.Errorf("a \"bedrock\" command needs an MCP server URL, e.g. \"bedrock https://sandbox-mcp.kubex.ai/... kubex-health-check\"")
+		return "", fmt.Errorf(
+			"a \"bedrock\" command needs either \"fleet <skill>\" or an MCP server URL, " +
+				"e.g. \"bedrock https://sandbox-mcp.kubex.ai/... kubex-health-check\"")
 	}
 
 	if loc := mcpUrlPattern.FindStringIndex(content); loc != nil {
@@ -234,6 +244,31 @@ func (s *Service) RunCommand(command string) (string, error) {
 // report would slot in later, without touching how the fan-out itself
 // works.
 func (s *Service) RunFleet(apiKey, model, skillWord, instruction string) (string, error) {
+	return s.runFleet(skillWord, instruction, func(skill *skills.Skill, input, mcpUrl, token string) (string, error) {
+		return s.callClaude(apiKey, resolveModel(skill, model), skill.Instructions, input, mcpUrl, token)
+	})
+}
+
+// RunFleetBedrock is RunFleet's Bedrock equivalent: same customers.csv
+// fan-out, but each customer's call goes through callBedrockWithMcpTool
+// (Bedrock's client-side tool-use loop) instead of callClaude/Anthropic's
+// MCP connector. No apiKey/model params — like every other Bedrock path,
+// BedrockSettings supplies the model, and a skill's own model override
+// doesn't apply here (Bedrock uses a different model-ID namespace).
+func (s *Service) RunFleetBedrock(skillWord, instruction string) (string, error) {
+	return s.runFleet(skillWord, instruction, func(skill *skills.Skill, input, mcpUrl, token string) (string, error) {
+		return s.callBedrockWithMcpTool(skill.Instructions, input, mcpUrl, token, requiredMcpToolName)
+	})
+}
+
+// runFleet resolves skillWord, loads customers.csv, and fans call out
+// across every customer (bounded by fleetConcurrency), joining each
+// customer's one-line answer (or "FAILED - <err>") into a single report.
+// call receives the resolved skill (for skill.Instructions and, for the
+// Anthropic path, its model override) plus that customer's input/URL/
+// token — RunFleet and RunFleetBedrock differ only in what call does
+// with them.
+func (s *Service) runFleet(skillWord, instruction string, call func(skill *skills.Skill, input, mcpUrl, token string) (string, error)) (string, error) {
 	skill := s.skillRegistry.Find(skillWord)
 	if skill == nil {
 		return "", fmt.Errorf("no skill named %q is installed", skillWord)
@@ -247,7 +282,6 @@ func (s *Service) RunFleet(apiKey, model, skillWord, instruction string) (string
 		return "", fmt.Errorf("no customers configured in %s", s.customersFile)
 	}
 
-	skillModel := resolveModel(skill, model)
 	dateContext := buildDateContext()
 
 	type outcome struct {
@@ -268,7 +302,7 @@ func (s *Service) RunFleet(apiKey, model, skillWord, instruction string) (string
 			defer func() { <-sem }()
 
 			input := dateContext + buildMcpContext(c.McpUrl) + orDefault(instruction, "Run this skill.")
-			text, err := s.callClaude(apiKey, skillModel, skill.Instructions, input, c.McpUrl, c.AuthorizationToken)
+			text, err := call(skill, input, c.McpUrl, c.AuthorizationToken)
 			results[i] = outcome{name: c.Name, text: strings.TrimSpace(text), err: err}
 		}(i, customer)
 	}
