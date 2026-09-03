@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -51,6 +52,7 @@ type bedrockConverseResponse struct {
 // branches (plain skills like onthisday, and the generic free-form
 // question fallback).
 func (s *Service) callBedrock(systemPrompt, userContent string) (string, error) {
+	log.Printf("Bedrock Converse call (no tool)")
 	resp, err := s.bedrockConverse(
 		[]bedrockMessage{{Role: "user", Content: []bedrockContentBlock{{Text: userContent}}}},
 		systemPrompt, nil)
@@ -86,12 +88,14 @@ func (s *Service) callBedrockWithMcpTool(systemPrompt, userContent, mcpServerUrl
 
 	messages := []bedrockMessage{{Role: "user", Content: []bedrockContentBlock{{Text: userContent}}}}
 
+	log.Printf("Bedrock Converse call 1/2 for %s (asking if %s is needed)", mcpServerUrl, toolName)
 	resp, err := s.bedrockConverse(messages, systemPrompt, toolConfig)
 	if err != nil {
 		return "", err
 	}
 
 	if resp.StopReason != "tool_use" {
+		log.Printf("Bedrock answered directly for %s, no tool call needed", mcpServerUrl)
 		return firstBedrockText(resp)
 	}
 
@@ -123,6 +127,7 @@ func (s *Service) callBedrockWithMcpTool(systemPrompt, userContent, mcpServerUrl
 		Content: []bedrockContentBlock{{ToolResult: &toolResult}},
 	})
 
+	log.Printf("Bedrock Converse call 2/2 for %s (sending %s result back for final answer)", mcpServerUrl, toolName)
 	finalResp, err := s.bedrockConverse(messages, systemPrompt, toolConfig)
 	if err != nil {
 		return "", err
