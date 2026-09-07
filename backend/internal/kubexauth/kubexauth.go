@@ -3,15 +3,22 @@
 // token that expires quickly. This calls Kubex's plain REST login
 // endpoint (POST {url}/api/v2/authorize), the same one the old
 // KubexHealthCheckService used before this project moved to MCP — it is
-// NOT the MCP server's own OAuth 2.1 flow. Whether the resulting token
-// is actually accepted as a bearer token by the MCP endpoint itself is
-// unverified; this is worth testing directly.
+// NOT the MCP server's own OAuth 2.1 flow.
+//
+// Confirmed directly (both by live testing and by Kubex's own docs):
+// this token is NOT accepted as a bearer token by the MCP server. MCP
+// access requires its own separately-authorized OAuth credential
+// ("explicitly authorized their LLM client application," refreshed
+// daily, per Kubex's MCP docs) — a fundamentally different credential
+// than this plain JWT login token. This token IS valid for Kubex's
+// other REST endpoints, though (see FetchClusters below).
 package kubexauth
 
 import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -101,4 +108,39 @@ func (c *Cache) login(url, username, password string) (string, error) {
 	}
 
 	return parsed.ApiToken, nil
+}
+
+// FetchClusters calls Kubex's REST "List Kubernetes clusters" endpoint
+// (GET {url}/api/v2/kubernetes/clusters) with token as the Bearer
+// credential, and returns the raw JSON response body. This is the REST
+// equivalent of the "kubex-cluster-connections" MCP tool, used because
+// this package's login token isn't accepted by the MCP server (see the
+// package doc comment) — the field names differ slightly from the MCP
+// tool's response, and there's no live connector "status" field in this
+// data at all, which callers should account for.
+func FetchClusters(client *http.Client, url, token string) (string, error) {
+	clustersUrl := strings.TrimRight(url, "/") + "/api/v2/kubernetes/clusters"
+	req, err := http.NewRequest(http.MethodGet, clustersUrl, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("Kubex clusters request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	return string(body), nil
 }

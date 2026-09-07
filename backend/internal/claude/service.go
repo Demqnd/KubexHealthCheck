@@ -227,16 +227,12 @@ func (s *Service) RunCommand(command string) (string, error) {
 }
 
 // RunFleet runs skillWord against every customer in customers.csv, each
-// with its own MCP URL and auth token (unlike the single shared
+// signed in with its own username/password (unlike the single shared
 // KubexMcpSettings token used by the single-URL command path), and
 // combines every customer's one-line answer into a single message.
 //
-// The token here is read directly from customers.csv (manually
-// obtained, e.g. via the MCP Inspector) rather than signed in for
-// automatically — internal/kubexauth has a username/password sign-in
-// path ready to swap in here once Kubex account setup (the
-// "API-enabled" flag) allows testing whether it actually works for MCP
-// auth, not just Kubex's plain REST API.
+// No MCP server is attached for any fleet customer, on either this path
+// or RunFleetBedrock — see runFleet's doc comment for why.
 //
 // This is the extension point for the "feed all the info back into
 // Claude for a final combined output" idea: right now the per-customer
@@ -245,31 +241,41 @@ func (s *Service) RunCommand(command string) (string, error) {
 // report would slot in later, without touching how the fan-out itself
 // works.
 func (s *Service) RunFleet(apiKey, model, skillWord, instruction string) (string, error) {
-	return s.runFleet(skillWord, instruction, func(skill *skills.Skill, input, mcpUrl, token string) (string, error) {
-		return s.callClaude(apiKey, resolveModel(skill, model), skill.Instructions, input, mcpUrl, token)
+	return s.runFleet(skillWord, instruction, func(skill *skills.Skill, input string) (string, error) {
+		return s.callClaude(apiKey, resolveModel(skill, model), skill.Instructions, input, "", "")
 	})
 }
 
 // RunFleetBedrock is RunFleet's Bedrock equivalent: same customers.csv
-// fan-out, but each customer's call goes through callBedrockWithMcpTool
-// (Bedrock's client-side tool-use loop) instead of callClaude/Anthropic's
-// MCP connector. No apiKey/model params — like every other Bedrock path,
+// fan-out and same pre-fetched-data approach, just calling Bedrock
+// (plain, no tool-use loop needed — see runFleet) instead of Anthropic.
+// No apiKey/model params — like every other Bedrock path,
 // BedrockSettings supplies the model, and a skill's own model override
 // doesn't apply here (Bedrock uses a different model-ID namespace).
 func (s *Service) RunFleetBedrock(skillWord, instruction string) (string, error) {
-	return s.runFleet(skillWord, instruction, func(skill *skills.Skill, input, mcpUrl, token string) (string, error) {
-		return s.callBedrockWithMcpTool(skill.Instructions, input, mcpUrl, token, requiredMcpToolName)
+	return s.runFleet(skillWord, instruction, func(skill *skills.Skill, input string) (string, error) {
+		return s.callBedrock(skill.Instructions, input)
 	})
 }
 
 // runFleet resolves skillWord, loads customers.csv, and fans call out
 // across every customer (bounded by fleetConcurrency), joining each
 // customer's one-line answer (or "FAILED - <err>") into a single report.
+//
+// Each customer's username/password signs in via kubexauth to get a
+// Kubex REST API token — confirmed (both by live testing and Kubex's
+// own MCP docs) that this token is NOT accepted by the MCP server,
+// which requires its own separately-authorized OAuth credential. So
+// instead of attaching an MCP server, this fetches the customer's
+// cluster data directly via Kubex's REST API (kubexauth.FetchClusters)
+// and embeds it as context before calling call — no MCP connector, and
+// for Bedrock, no tool-use loop either, since the data's already in
+// hand before the model is ever called.
+//
 // call receives the resolved skill (for skill.Instructions and, for the
-// Anthropic path, its model override) plus that customer's input/URL/
-// token — RunFleet and RunFleetBedrock differ only in what call does
-// with them.
-func (s *Service) runFleet(skillWord, instruction string, call func(skill *skills.Skill, input, mcpUrl, token string) (string, error)) (string, error) {
+// Anthropic path, its model override) plus the fully-built input text —
+// RunFleet and RunFleetBedrock differ only in what call does with them.
+func (s *Service) runFleet(skillWord, instruction string, call func(skill *skills.Skill, input string) (string, error)) (string, error) {
 	skill := s.skillRegistry.Find(skillWord)
 	if skill == nil {
 		return "", fmt.Errorf("no skill named %q is installed", skillWord)
@@ -312,9 +318,14 @@ func (s *Service) runFleet(skillWord, instruction string, call func(skill *skill
 				results[i] = outcome{name: c.Name, err: fmt.Errorf("sign-in failed: %w", err)}
 				return
 			}
+			clustersJson, err := kubexauth.FetchClusters(s.httpClient, authUrl, token)
+			if err != nil {
+				results[i] = outcome{name: c.Name, err: fmt.Errorf("failed to fetch cluster data: %w", err)}
+				return
+			}
 
-			input := dateContext + buildMcpContext(c.McpUrl) + orDefault(instruction, "Run this skill.")
-			text, err := call(skill, input, c.McpUrl, token)
+			input := dateContext + buildClusterDataContext(c.Name, clustersJson) + orDefault(instruction, "Run this skill.")
+			text, err := call(skill, input)
 			results[i] = outcome{name: c.Name, text: strings.TrimSpace(text), err: err}
 		}(i, customer)
 	}
@@ -428,6 +439,26 @@ func buildMcpContext(mcpServerUrl string) string {
 			"that's the client this run is for. Do not ask which client to use, and skip any "+
 			"connector-list/resolution step — just use the MCP tools already available to you.]\n\n",
 		mcpServerUrl)
+}
+
+// buildClusterDataContext embeds cluster data already fetched via
+// Kubex's REST API (kubexauth.FetchClusters) for one fleet customer, in
+// place of attaching an MCP server (see runFleet's doc comment for why
+// fleet customers can't use one at all). The REST response's field
+// names differ from the "kubex-cluster-connections" MCP tool's — and,
+// importantly, it has no live connector "status" field at all — so both
+// are called out explicitly here to keep the skill's health-check logic
+// from silently degrading.
+func buildClusterDataContext(customerName, clustersJson string) string {
+	return fmt.Sprintf(
+		"[Context: here is the real, current cluster connection data for %s, fetched directly from Kubex's REST "+
+			"API (GET /kubernetes/clusters) rather than the kubex-cluster-connections MCP tool. Field names differ "+
+			"slightly (\"cluster\" not \"clusterName\", \"lastCollectionTime\" not \"lastDataCollectionTime\", "+
+			"\"kubexAgentVersion\" not \"forwarderVersion\"), and there is no live \"status\" field in this data at "+
+			"all — treat a cluster that hasn't collected data recently as needing attention instead of looking for "+
+			"a status value. Use ONLY this data to answer; do not ask which client to use or attempt to call any "+
+			"tools:]\n\n%s\n\n",
+		customerName, clustersJson)
 }
 
 func (s *Service) callClaude(apiKey, model, systemPrompt, userContent, mcpServerUrl, mcpToken string) (string, error) {

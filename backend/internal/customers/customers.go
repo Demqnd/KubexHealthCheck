@@ -6,7 +6,10 @@
 // Username/password sign-in (internal/kubexauth) replaces a manually
 // obtained, quickly-expiring MCP token: instead of pasting a token in
 // here per customer, each row carries a username/password that gets
-// signed in at call time.
+// signed in at call time. Confirmed that this sign-in only produces a
+// Kubex REST API credential, not one the MCP server accepts — so the
+// fleet path fetches cluster data via REST instead of attaching an MCP
+// server for these customers at all (see runFleet in internal/claude).
 package customers
 
 import (
