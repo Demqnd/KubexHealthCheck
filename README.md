@@ -63,21 +63,19 @@ The MCP server's own auth token comes from the server-side `KubexMcpSettings:Aut
 
 ### Fleet reports (multiple customers, one Teams message)
 
-The single-URL command above needs one shared `KubexMcpSettings:AuthorizationToken` that has to work against every MCP URL you supply — fine for one or two clients, not for querying many customers who each issued you their own token. `fleet <skillword> [instruction]` (e.g. `@KubexAI fleet kubex-cluster-count`) is the multi-customer version: it runs that skill once per customer listed in `backend/customers.csv`, **each with its own MCP URL and its own auth token**, and combines every customer's answer into a single message — one post to Teams, not one per customer.
+The single-URL command above needs one shared `KubexMcpSettings:AuthorizationToken` that has to work against every MCP URL you supply — fine for one or two clients, not for querying many customers who each have their own Kubex login. `fleet <skillword> [instruction]` (e.g. `@KubexAI fleet kubex-cluster-count`) and its Bedrock equivalent `bedrock fleet <skillword> [instruction]` are the multi-customer versions: each runs that skill once per customer listed in `backend/customers.csv`, **each with its own MCP URL and its own username/password**, and combines every customer's answer into a single message — one post to Teams, not one per customer.
 
-`backend/customers.csv` (gitignored — see `customers.csv.example` for the shape) is a plain three-column CSV: name in column A, MCP URL in column B, authorization token in column C.
+`backend/customers.csv` (gitignored — see `customers.csv.example` for the shape) is a plain four-column CSV: name in column A, MCP URL in column B, username in column C, password in column D.
 
 ```csv
-name,mcpUrl,authorizationToken
-sandbox,https://sandbox-mcp.kubex.ai,your-real-token-here
-sandboxuat,https://sandboxuat-mcp.kubex.ai,your-other-real-token-here
+name,mcpUrl,username,password
+sandbox,https://sandbox-mcp.kubex.ai,your-densify-username,your-densify-password
+sandboxuat,https://sandboxuat-mcp.kubex.ai,your-densify-username,your-densify-password
 ```
 
 The header row is optional — it's detected and skipped automatically (a first row whose column B doesn't start with `http` is treated as a header), so the file works with or without one.
 
-Each token has to be obtained manually right now (e.g. via the MCP Inspector — see the Setup section) and pasted in here per customer; it'll expire and need replacing periodically, same as `KubexMcpSettings:AuthorizationToken` does.
-
-**Automating that sign-in is a work in progress, not wired in yet.** `internal/kubexauth` has a username/password sign-in path (calls Kubex's REST login, `POST {apiUrl}/api/v2/authorize`, to get a bearer token automatically instead of a manually-obtained one) — built and tested against the real endpoint, but not currently used by `RunFleet`. Two things are blocking turning it on: it needs a Kubex account with the "API-enabled" flag set (confirmed as a real, separate requirement in Kubex's own docs — a plain active-user login isn't enough), and even once that's sorted, it's still unverified whether the token that login returns is actually accepted by the MCP server itself as a bearer token, since the MCP server enforces its own separate OAuth 2.1 flow. Once both are confirmed, swapping `RunFleet` back to sign in per customer instead of reading a static token is a small, contained change.
+Each customer's username/password signs in automatically at call time via `internal/kubexauth` (`POST {plain-host}/api/v2/authorize`, cached ~55 minutes per customer) — no manually-obtained, expiring token to paste in and replace periodically, unlike `KubexMcpSettings:AuthorizationToken`. The sign-in host is derived from the MCP URL by stripping `-mcp` from the hostname (e.g. `sandboxuat-mcp.kubex.ai` → `sandboxuat.kubex.ai`) — a different host than the MCP URL itself, since the MCP server enforces its own separate OAuth 2.1 flow and doesn't serve this login endpoint.
 
 Notes:
 

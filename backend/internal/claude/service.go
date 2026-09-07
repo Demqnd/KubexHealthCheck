@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"sync"
@@ -301,8 +302,19 @@ func (s *Service) runFleet(skillWord, instruction string, call func(skill *skill
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
+			authUrl, err := kubexAuthUrl(c.McpUrl)
+			if err != nil {
+				results[i] = outcome{name: c.Name, err: err}
+				return
+			}
+			token, err := s.kubexAuth.Token(authUrl, c.Username, c.Password)
+			if err != nil {
+				results[i] = outcome{name: c.Name, err: fmt.Errorf("sign-in failed: %w", err)}
+				return
+			}
+
 			input := dateContext + buildMcpContext(c.McpUrl) + orDefault(instruction, "Run this skill.")
-			text, err := call(skill, input, c.McpUrl, c.AuthorizationToken)
+			text, err := call(skill, input, c.McpUrl, token)
 			results[i] = outcome{name: c.Name, text: strings.TrimSpace(text), err: err}
 		}(i, customer)
 	}
@@ -324,6 +336,25 @@ func (s *Service) runFleet(skillWord, instruction string, call func(skill *skill
 		summary = fmt.Sprintf("Fleet report: %d of %d customers failed.\n\n%s", failures, len(results), summary)
 	}
 	return summary, nil
+}
+
+// kubexAuthUrl turns an MCP URL like "https://sandboxuat-mcp.kubex.ai/mcp"
+// into the plain REST host its /api/v2/authorize login endpoint lives on
+// ("https://sandboxuat.kubex.ai") — a different host than the MCP URL
+// itself, confirmed by testing both directly: the MCP host enforces
+// OAuth on every path, while the plain host (no "-mcp") serves the
+// username/password login endpoint internal/kubexauth calls.
+func kubexAuthUrl(mcpUrl string) (string, error) {
+	parsed, err := url.Parse(mcpUrl)
+	if err != nil {
+		return "", fmt.Errorf("invalid MCP URL %q: %w", mcpUrl, err)
+	}
+	if !strings.Contains(parsed.Host, "-mcp") {
+		return "", fmt.Errorf("MCP URL %q does not look like a Kubex MCP host (expected \"-mcp\" in the hostname)", mcpUrl)
+	}
+	parsed.Host = strings.Replace(parsed.Host, "-mcp", "", 1)
+	parsed.Path = ""
+	return parsed.String(), nil
 }
 
 func splitFirstWord(content string) (first string, rest string) {

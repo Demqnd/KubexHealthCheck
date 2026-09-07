@@ -1,13 +1,12 @@
 // Package customers loads the list of Kubex clients this service can run
-// a fleet report across — each with its own MCP URL and its own
-// authorization token (unlike the single shared KubexMcpSettings token
-// used for a one-off "@KubexAI <url> <skill>" command).
+// a fleet report across — each with its own MCP URL and its own login
+// credentials (unlike the single shared KubexMcpSettings token used for
+// a one-off "@KubexAI <url> <skill>" command).
 //
-// This is the token-based version: each customer's token has to be
-// obtained manually (e.g. via the MCP Inspector) and pasted in here.
-// internal/kubexauth has an alternate, username/password-based sign-in
-// path for automating that — not wired in here yet, pending Kubex
-// account setup (the "API-enabled" flag) needed to test it end-to-end.
+// Username/password sign-in (internal/kubexauth) replaces a manually
+// obtained, quickly-expiring MCP token: instead of pasting a token in
+// here per customer, each row carries a username/password that gets
+// signed in at call time.
 package customers
 
 import (
@@ -17,14 +16,15 @@ import (
 )
 
 type Customer struct {
-	Name               string
-	McpUrl             string
-	AuthorizationToken string
+	Name     string
+	McpUrl   string
+	Username string
+	Password string
 }
 
 // Load reads the customer list from a CSV file: name in column A, MCP
-// URL in column B, authorization token in column C. A header row is
-// optional — if the first row's column B doesn't look like a URL
+// URL in column B, username in column C, password in column D. A header
+// row is optional — if the first row's column B doesn't look like a URL
 // (doesn't start with "http"), it's treated as a header and skipped;
 // otherwise every row is read as data.
 func Load(path string) ([]Customer, error) {
@@ -55,14 +55,18 @@ func Load(path string) ([]Customer, error) {
 			continue
 		}
 		if i == 0 && !strings.HasPrefix(strings.ToLower(mcpUrl), "http") {
-			// Looks like a header row (e.g. "name,mcpUrl,authorizationToken")
+			// Looks like a header row (e.g. "name,mcpUrl,username,password")
 			// — skip it rather than treating it as a bogus customer.
 			continue
 		}
 
-		token := ""
+		username := ""
 		if len(row) > 2 {
-			token = strings.TrimSpace(row[2])
+			username = strings.TrimSpace(row[2])
+		}
+		password := ""
+		if len(row) > 3 {
+			password = strings.TrimSpace(row[3])
 		}
 
 		if name == "" {
@@ -70,9 +74,10 @@ func Load(path string) ([]Customer, error) {
 		}
 
 		list = append(list, Customer{
-			Name:               name,
-			McpUrl:             mcpUrl,
-			AuthorizationToken: token,
+			Name:     name,
+			McpUrl:   mcpUrl,
+			Username: username,
+			Password: password,
 		})
 	}
 	return list, nil

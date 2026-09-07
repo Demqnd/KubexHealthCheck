@@ -52,11 +52,11 @@ type Config struct {
 	DataDirectory   string `json:"DataDirectory"`
 	SkillsDirectory string `json:"SkillsDirectory"`
 
-	// Path to the JSON file listing fleet-report customers (name +
-	// per-customer MCP URL + auth token). Defaults to "customers.json"
-	// next to the running binary if unset. Real tokens live in this
-	// file, not in appsettings*.json, so it's gitignored — only
-	// customers.json.example is checked in.
+	// Path to the CSV file listing fleet-report customers (name +
+	// per-customer MCP URL + username/password). Defaults to
+	// "customers.csv" next to the running binary if unset. Real
+	// credentials live in this file, not in appsettings*.json, so it's
+	// gitignored — only customers.csv.example is checked in.
 	CustomersFile string `json:"CustomersFile"`
 }
 
