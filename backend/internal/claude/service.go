@@ -63,9 +63,9 @@ var (
 	leadingMentionPattern = regexp.MustCompile(`^@\S+\s*`)
 
 	// "fleet <skillword> [instruction]" runs that skill against every
-	// customer in customers.csv (each with its own MCP URL + token) and
-	// combines all their answers into one message, instead of the usual
-	// single-URL-per-command path.
+	// customer in customers.csv (each signed in with its own
+	// username/password) and combines all their answers into one
+	// message, instead of the usual single-URL-per-command path.
 	fleetPrefixPattern = regexp.MustCompile(`(?i)^fleet\s+`)
 
 	// "bedrock <url> <skill> [instruction]" is the Bedrock equivalent of
