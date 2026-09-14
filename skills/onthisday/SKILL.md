@@ -6,7 +6,7 @@ Shares one genuine, verifiable historical event that happened on today's calenda
 
 ## Invocation
 
-`@KubexAI onthisday`
+`onthisday`
 
 No parameter is required. If extra words follow `onthisday`, treat them as an optional topic hint (e.g. `onthisday science`) — prefer a fact matching that topic if a well-documented one exists for the date, otherwise fall back to the best-documented event and don't force the topic.
 

@@ -23,16 +23,6 @@ type Config struct {
 		DefaultUrl string `json:"DefaultUrl"`
 	} `json:"WebhookSettings"`
 
-	ClaudeApiSettings struct {
-		ApiKey string `json:"ApiKey"`
-		Model  string `json:"Model"`
-	} `json:"ClaudeApiSettings"`
-
-	// Bedrock is only used by RunCommand's plain (non-MCP) paths right
-	// now — a skill or command that attaches an MCP server (single-URL
-	// commands, "fleet") keeps using ClaudeApiSettings/Anthropic's direct
-	// API, since AWS Bedrock doesn't support Anthropic's MCP connector
-	// feature at all. See internal/claude/bedrock.go.
 	BedrockSettings struct {
 		// The Bedrock API key (bearer-token style, "Authorization:
 		// Bearer <key>") — not an Anthropic key, not IAM credentials.
@@ -45,14 +35,9 @@ type Config struct {
 		ModelId string `json:"ModelId"`
 	} `json:"BedrockSettings"`
 
-	KubexMcpSettings struct {
-		AuthorizationToken string `json:"AuthorizationToken"`
-	} `json:"KubexMcpSettings"`
-
-	DataDirectory   string `json:"DataDirectory"`
 	SkillsDirectory string `json:"SkillsDirectory"`
 
-	// Path to the CSV file listing fleet-report customers (name +
+	// Path to the CSV file listing fleet customers (name +
 	// per-customer MCP URL + username/password). Defaults to
 	// "customers.csv" next to the running binary if unset. Real
 	// credentials live in this file, not in appsettings*.json, so it's
@@ -62,7 +47,6 @@ type Config struct {
 
 func Load() (*Config, error) {
 	cfg := &Config{}
-	cfg.ClaudeApiSettings.Model = "claude-opus-5"
 
 	env := os.Getenv("ASPNETCORE_ENVIRONMENT")
 	if env == "" {
@@ -110,15 +94,6 @@ func applyEnvOverrides(cfg *Config) {
 	if v, ok := os.LookupEnv("WebhookSettings__DefaultUrl"); ok {
 		cfg.WebhookSettings.DefaultUrl = v
 	}
-	if v, ok := os.LookupEnv("ClaudeApiSettings__ApiKey"); ok {
-		cfg.ClaudeApiSettings.ApiKey = v
-	}
-	if v, ok := os.LookupEnv("ClaudeApiSettings__Model"); ok {
-		cfg.ClaudeApiSettings.Model = v
-	}
-	if v, ok := os.LookupEnv("KubexMcpSettings__AuthorizationToken"); ok {
-		cfg.KubexMcpSettings.AuthorizationToken = v
-	}
 	if v, ok := os.LookupEnv("BedrockSettings__ApiKey"); ok {
 		cfg.BedrockSettings.ApiKey = v
 	}
@@ -127,9 +102,6 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v, ok := os.LookupEnv("BedrockSettings__ModelId"); ok {
 		cfg.BedrockSettings.ModelId = v
-	}
-	if v, ok := os.LookupEnv("DataDirectory"); ok {
-		cfg.DataDirectory = v
 	}
 	if v, ok := os.LookupEnv("SkillsDirectory"); ok {
 		cfg.SkillsDirectory = v

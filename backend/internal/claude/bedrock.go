@@ -9,30 +9,10 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-
-	"kubexhealthcheck/internal/kubexmcp"
 )
 
-// bedrockContentBlock covers the three content block shapes this file
-// deals with: plain text, a tool-use request from the model, and a tool
-// result we send back. Only the relevant fields get set/marshaled for
-// any given block, via "omitempty".
 type bedrockContentBlock struct {
-	Text       string             `json:"text,omitempty"`
-	ToolUse    *bedrockToolUse    `json:"toolUse,omitempty"`
-	ToolResult *bedrockToolResult `json:"toolResult,omitempty"`
-}
-
-type bedrockToolUse struct {
-	ToolUseId string         `json:"toolUseId"`
-	Name      string         `json:"name"`
-	Input     map[string]any `json:"input"`
-}
-
-type bedrockToolResult struct {
-	ToolUseId string           `json:"toolUseId"`
-	Content   []map[string]any `json:"content"`
-	Status    string           `json:"status,omitempty"`
+	Text string `json:"text,omitempty"`
 }
 
 type bedrockMessage struct {
@@ -47,101 +27,17 @@ type bedrockConverseResponse struct {
 	StopReason string `json:"stopReason"`
 }
 
-// callBedrock is the AWS Bedrock equivalent of callClaude, for plain
-// (no MCP server attached) prompts. Used by RunCommand's non-MCP
-// branches (plain skills like onthisday, and the generic free-form
-// question fallback).
+// callBedrock sends a system prompt + user message to AWS Bedrock's
+// Converse API and returns the model's text answer.
 func (s *Service) callBedrock(systemPrompt, userContent string) (string, error) {
-	log.Printf("Bedrock Converse call (no tool)")
+	log.Printf("Bedrock Converse call")
 	resp, err := s.bedrockConverse(
 		[]bedrockMessage{{Role: "user", Content: []bedrockContentBlock{{Text: userContent}}}},
-		systemPrompt, nil)
+		systemPrompt)
 	if err != nil {
 		return "", err
 	}
 	return firstBedrockText(resp)
-}
-
-// callBedrockWithMcpTool is Bedrock's equivalent of callClaude's MCP
-// path — Bedrock has no MCP connector, so this implements the
-// client-side tool-use loop AWS documents for the Converse API: define
-// the tool, let the model ask to call it, actually call it ourselves
-// (via kubexmcp, since somebody has to speak MCP), and send the result
-// back for the model to finish its answer with.
-func (s *Service) callBedrockWithMcpTool(systemPrompt, userContent, mcpServerUrl, mcpToken, toolName string) (string, error) {
-	toolConfig := map[string]any{
-		"tools": []map[string]any{
-			{
-				"toolSpec": map[string]any{
-					"name":        bedrockToolName(toolName),
-					"description": "Get per-cluster Kubernetes health data for this Kubex client.",
-					"inputSchema": map[string]any{
-						"json": map[string]any{
-							"type":       "object",
-							"properties": map[string]any{},
-						},
-					},
-				},
-			},
-		},
-	}
-
-	messages := []bedrockMessage{{Role: "user", Content: []bedrockContentBlock{{Text: userContent}}}}
-
-	log.Printf("Bedrock Converse call 1/2 for %s (asking if %s is needed)", mcpServerUrl, toolName)
-	resp, err := s.bedrockConverse(messages, systemPrompt, toolConfig)
-	if err != nil {
-		return "", err
-	}
-
-	if resp.StopReason != "tool_use" {
-		log.Printf("Bedrock answered directly for %s, no tool call needed", mcpServerUrl)
-		return firstBedrockText(resp)
-	}
-
-	var toolUse *bedrockToolUse
-	for _, block := range resp.Output.Message.Content {
-		if block.ToolUse != nil {
-			toolUse = block.ToolUse
-			break
-		}
-	}
-	if toolUse == nil {
-		return "", fmt.Errorf("Bedrock reported stopReason \"tool_use\" but no toolUse block was found")
-	}
-
-	mcpClient := kubexmcp.NewClient()
-	toolText, toolErr := mcpClient.CallTool(mcpServerUrl, mcpToken, toolName, map[string]any{})
-
-	toolResult := bedrockToolResult{ToolUseId: toolUse.ToolUseId}
-	if toolErr != nil {
-		toolResult.Content = []map[string]any{{"text": toolErr.Error()}}
-		toolResult.Status = "error"
-	} else {
-		toolResult.Content = []map[string]any{{"text": toolText}}
-	}
-
-	messages = append(messages, resp.Output.Message)
-	messages = append(messages, bedrockMessage{
-		Role:    "user",
-		Content: []bedrockContentBlock{{ToolResult: &toolResult}},
-	})
-
-	log.Printf("Bedrock Converse call 2/2 for %s (sending %s result back for final answer)", mcpServerUrl, toolName)
-	finalResp, err := s.bedrockConverse(messages, systemPrompt, toolConfig)
-	if err != nil {
-		return "", err
-	}
-	return firstBedrockText(finalResp)
-}
-
-// bedrockToolName maps a Kubex MCP tool name (which contains hyphens,
-// e.g. "kubex-cluster-connections") to a name Bedrock's toolSpec accepts
-// — hyphens aren't valid there, so this uses underscores for the
-// Bedrock-facing name while kubexmcp.CallTool still gets the real,
-// unmodified MCP tool name.
-func bedrockToolName(mcpToolName string) string {
-	return strings.ReplaceAll(mcpToolName, "-", "_")
 }
 
 func firstBedrockText(resp *bedrockConverseResponse) (string, error) {
@@ -155,7 +51,7 @@ func firstBedrockText(resp *bedrockConverseResponse) (string, error) {
 	return text.String(), nil
 }
 
-func (s *Service) bedrockConverse(messages []bedrockMessage, systemPrompt string, toolConfig map[string]any) (*bedrockConverseResponse, error) {
+func (s *Service) bedrockConverse(messages []bedrockMessage, systemPrompt string) (*bedrockConverseResponse, error) {
 	region := s.cfg.BedrockSettings.Region
 	modelId := s.cfg.BedrockSettings.ModelId
 	apiKey := s.cfg.BedrockSettings.ApiKey
@@ -176,9 +72,6 @@ func (s *Service) bedrockConverse(messages []bedrockMessage, systemPrompt string
 		"inferenceConfig": map[string]any{
 			"maxTokens": 1024,
 		},
-	}
-	if toolConfig != nil {
-		requestBody["toolConfig"] = toolConfig
 	}
 
 	bodyBytes, err := json.Marshal(requestBody)

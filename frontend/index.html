@@ -18,12 +18,12 @@
 </head>
 <body>
   <h1>KubexAI Command</h1>
-  <p class="hint">Type whatever a Teams user would type after @KubexAI — an MCP URL + skill word (e.g. "https://sandboxuat-mcp.kubex.ai kubex-cluster-count"), a plain skill word (e.g. "onthisday"), or a free-form question. Same call the bot makes; the response also gets posted to the configured Teams webhook.</p>
+  <p class="hint">Type a message like "hi" to ask Bedrock something directly, or "run health check" to run the fleet health check across every customer in customers.csv. The response also gets posted to the configured Teams webhook.</p>
 
   <form id="commandForm">
     <label>
       Command
-      <textarea id="commandText" placeholder="https://sandboxuat-mcp.kubex.ai kubex-cluster-count" required></textarea>
+      <textarea id="commandText" placeholder="run health check" required></textarea>
     </label>
     <button type="submit">Send Command</button>
   </form>

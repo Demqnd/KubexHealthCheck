@@ -1,6 +1,5 @@
 // Package api wires up the HTTP endpoints: the API-key auth gate, CORS
-// for the static frontend, and the handlers for /api/claude/* and
-// /api/webhook*.
+// for the static frontend, and the handler for /api/claude/command.
 package api
 
 import (
@@ -18,16 +17,14 @@ const apiKeyHeader = "X-Api-Key"
 type Server struct {
 	cfg           *config.Config
 	claudeService *claude.Service
-	webhookStore  *webhook.Store
 	webhookSender *webhook.Sender
 	mux           *http.ServeMux
 }
 
-func NewServer(cfg *config.Config, claudeService *claude.Service, webhookStore *webhook.Store, webhookSender *webhook.Sender) *Server {
+func NewServer(cfg *config.Config, claudeService *claude.Service, webhookSender *webhook.Sender) *Server {
 	s := &Server{
 		cfg:           cfg,
 		claudeService: claudeService,
-		webhookStore:  webhookStore,
 		webhookSender: webhookSender,
 		mux:           http.NewServeMux(),
 	}
@@ -40,11 +37,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) routes() {
-	s.mux.HandleFunc("GET /api/webhook", s.withApiKey(s.handleGetWebhook))
-	s.mux.HandleFunc("PUT /api/webhook", s.withApiKey(s.handleUpdateWebhook))
-	s.mux.HandleFunc("POST /api/webhook/send", s.withApiKey(s.handleSendWebhookMessage))
+	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
 	s.mux.HandleFunc("POST /api/claude/command", s.withApiKey(s.handleClaudeCommand))
-	s.mux.HandleFunc("POST /api/claude/ask", s.withApiKey(s.handleClaudeAsk))
+}
+
+// handleHealthz is unauthenticated on purpose — it's only used to check
+// whether the process is up and listening (e.g. GitHub Actions polling
+// after starting the backend), not to expose anything sensitive.
+func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 // The frontend is a static file opened directly (file://), which sends

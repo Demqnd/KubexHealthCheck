@@ -1,15 +1,9 @@
-// Package customers loads the list of Kubex clients this service can run
-// a fleet report across — each with its own MCP URL and its own login
-// credentials (unlike the single shared KubexMcpSettings token used for
-// a one-off "@KubexAI <url> <skill>" command).
-//
-// Username/password sign-in (internal/kubexauth) replaces a manually
-// obtained, quickly-expiring MCP token: instead of pasting a token in
-// here per customer, each row carries a username/password that gets
-// signed in at call time. Confirmed that this sign-in only produces a
-// Kubex REST API credential, not one the MCP server accepts — so the
-// fleet path fetches cluster data via REST instead of attaching an MCP
-// server for these customers at all (see runFleet in internal/claude).
+// Package customers loads the list of Kubex clients the fleet health
+// check runs across — each with its own MCP URL and its own login
+// credentials. Each row's username/password signs in at call time (via
+// internal/kubexauth) to get a token, which is then used to call the
+// real kubex-cluster-connections MCP tool (via internal/kubexmcp) for
+// that customer.
 package customers
 
 import (
