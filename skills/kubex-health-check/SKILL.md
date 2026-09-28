@@ -2,12 +2,7 @@
 
 ## What this skill does
 
-Given a client identifier (a Kubex MCP hostname like `sandboxuat-mcp.kubex.ai`, or a short client name), pull that client's Kubernetes cluster connection data from Kubex and produce a short, clean health summary covering:
-
-1. **Cluster count** — how many clusters are under this connection.
-2. **Connection status** — is every cluster in a healthy state, or does something need action?
-3. **Data freshness** — has every cluster collected data in the last 24 hours?
-4. **A per-cluster breakdown** — for every cluster: its real status, its collector (forwarder) version (flagged if it's not the newest version present), and its container count.
+Given a client identifier (a Kubex MCP hostname like `sandboxuat-mcp.kubex.ai`, or a short client name), pull that client's Kubernetes cluster connection data from Kubex and produce a simple table, one row per cluster, so a dev can glance at it and immediately tell whether everything's working — no reading required, just a quick scan. Each row has: cluster name, status, collector (forwarder) version (flagged if it's not the newest version present), and container count. Anything that needs a closer look (a bad status, an outdated version) is visible right there in the row; a dev who spots one goes and investigates that specific cluster themselves.
 
 The parameter is designed to be swappable — the same steps below should work whether the client this run is for is `sandboxuat-mcp.kubex.ai`, `fedex-mcp.kubex.ai`, some other Kubex MCP host, or a short client name, as long as that client is already connected.
 
@@ -32,51 +27,39 @@ To resolve the parameter to an actual connector, don't just assume — look it u
 
 ## Steps
 
-1. Call the Kubex cluster-connections tool for the connector (e.g. `kubex-cluster-connections`). This returns, per cluster: `clusterName`, `status`, `lastDataCollectionTime`, `forwarderVersion`, `prometheusVersion`, `kubernetesVersion`, `nodeCount`, `containerCount`. Note that each entry here is one cluster connection — that's the unit of counting and status/freshness checks below, not the individual node counts inside a cluster.
-2. **Cluster count:** count the entries returned. This number is always reported, e.g. "14 clusters connected."
-3. **Status check:** a cluster is healthy if its `status` is one of the good/active states — `Ready` or `Collecting` are both fine (both mean the pipeline is up; `Collecting` just tends to mean it's newer / still backfilling). Any other status is not one of those and needs action: call it out explicitly with the cluster name(s) and the status value, e.g. "2 clusters need attention: `foo-cluster` (Error), `bar-cluster` (Disconnected)." If every cluster is healthy, say so in one line rather than listing all of them.
-4. **Freshness check (24-hour window):** compare each cluster's `lastDataCollectionTime` to the current time. Default to US Eastern time (EST/EDT) for "now" unless the user has told you a different timezone to use, or a current-date context was already given to you (use that instead of guessing).
-   - If every cluster collected within the last 24 hours, say so in one line and include how recent the most current cluster's collection is, e.g. "All N clusters have collected data in the past 24 hours (most recent: 9.1h ago)." Compute that "most recent" figure as the smallest hours-since-collection value across all clusters, to one decimal place.
-   - If any cluster hasn't, report how many and which ones need action, with how stale each is, e.g. "3 of 14 clusters haven't collected in over 24 hours and need action: `foo-cluster` (last seen 31h ago), ..."
-   - If the user asks for a different format (e.g. just hours, or hours+minutes) or a different staleness window, use that instead.
-5. **Per-cluster breakdown:** list every cluster returned, one per line, with its real `status` value, its `forwarderVersion`, and its `containerCount`. Determine the newest `forwarderVersion` present among this run's clusters (the highest version number in the batch), and flag any cluster not on that version as `(outdated)`. Format each line consistently, e.g.:
-   `foo-cluster: Ready, collector v4.7.3, 6000 containers`
-   `lilly-kubed-prd: Collecting, collector v4.2.6 (outdated), 953 containers`
-   This is a full listing, not just the clusters needing attention — every cluster gets a line. `prometheusVersion`/`kubernetesVersion` drift can still be mentioned as a brief aside (e.g. "all on Kubernetes v1.28") if it's uniform or notably not, but don't repeat a full breakdown of those two on top of the per-cluster lines above.
-6. **Summary:** lead with the cluster count, the status verdict, and the 24-hour freshness verdict as a short headline, then the full per-cluster breakdown from step 5.
-7. **Deliver the result — this step depends on which context you're running in:**
+1. Call the Kubex cluster-connections tool for the connector (e.g. `kubex-cluster-connections`). This returns, per cluster: `clusterName`, `status`, `lastDataCollectionTime`, `forwarderVersion`, `prometheusVersion`, `kubernetesVersion`, `nodeCount`, `containerCount`. Each entry here is one cluster connection — that's the row unit below, not the individual node counts inside a cluster.
+2. Determine the newest `forwarderVersion` present among this run's clusters (the highest version number in the batch) — that's the reference point for flagging any other cluster as outdated.
+3. Build one row per cluster returned — every cluster gets a row, not just ones with a problem — with exactly these four fields: cluster name, its real `status` value (don't invent or relabel it — report `Ready`, `Collecting`, `Error`, `Disconnected`, etc. exactly as returned), its `forwarderVersion` (append `(outdated)` if it isn't the newest version found in step 2), and its `containerCount`.
+4. **Deliver the result — this step depends on which context you're running in:**
    - **Interactively (Claude Code / Claude Desktop), with local file access:** write the result as JSON to `kubex-health-latest.json` inside `C:\Users\conno\Claude Cowork` (connect that folder via `mcp__cowork__request_cowork_directory` first if it isn't already mounted). This is picked up by a separate local script that posts a Teams/Power Automate notification — your job stops at writing an accurate file. Use this exact shape:
 
      ```json
      {
        "timestamp": "<ISO-8601, US Eastern>",
        "clusterCount": 15,
-       "statusHealthy": true,
-       "statusIssues": [{"clusterName": "foo-cluster", "status": "Error"}],
-       "freshnessHealthy": true,
-       "freshestHoursAgo": 9.1,
-       "staleClusters": [{"clusterName": "foo-cluster", "hoursSinceCollection": 31}],
-       "forwarderOldestVersion": "v4.3.0",
-       "forwarderOldestCount": 15,
-       "prometheusOldestVersion": "2.46.0",
-       "prometheusOldestCount": 1,
-       "kubernetesOldestVersion": "1.28",
-       "kubernetesOldestCount": 3,
-       "summary": "<the one-paragraph plain-text summary shown in chat>"
+       "newestForwarderVersion": "v4.7.3",
+       "clusters": [
+         {"clusterName": "foo-cluster", "status": "Ready", "forwarderVersion": "v4.7.3", "outdated": false, "containerCount": 6000},
+         {"clusterName": "lilly-kubed-prd", "status": "Collecting", "forwarderVersion": "v4.2.6", "outdated": true, "containerCount": 953}
+       ],
+       "summary": "<the plain-text table shown in chat>"
      }
      ```
 
-     `statusIssues` and `staleClusters` are empty arrays when everything's healthy/fresh.
+     One entry in `clusters` per cluster returned, in the same order as the tool result.
    - **Via the KubexHealthCheck backend:** there is no local filesystem to write to, and no separate relay script — just answer in plain text (see "Output style" below). The backend itself posts your response directly to the configured Teams webhook; nothing else needs to happen after you answer.
 
 ## Output style
 
-Plain text — no markdown formatting (no headers, bullets, or bold), since this is posted directly as a Teams message. Structure:
+Just the table — plain text, no markdown formatting (no headers, bullets, or bold), since this is posted directly as a Teams message. No summary paragraph, no status/freshness verdict sentence, no preamble — a dev scanning it should see the table immediately. Format:
 
-1. A short headline line: cluster count → status (all healthy, or which need action) → freshness (all current, or which need action).
-2. Then one line per cluster (the per-cluster breakdown from step 5), each on its own line in the `<clusterName>: <status>, collector vX.Y.Z<optional " (outdated)">, <N> containers` format.
+```
+Cluster | Status | Version | Containers
+foo-cluster | Ready | v4.7.3 | 6000
+lilly-kubed-prd | Collecting | v4.2.6 (outdated) | 953
+```
 
-No mention of which connector was matched unless there was an ambiguity worth flagging. If you wrote a local result file (interactive context only), mention it briefly, e.g. "(saved to kubex-health-latest.json)" — don't dwell on it.
+One header row, then one row per cluster from step 3, `|`-separated, same column order every time. No mention of which connector was matched unless there was an ambiguity worth flagging — in that case, say so as a separate line before the table. If you wrote a local result file (interactive context only), add one line after the table, e.g. "(saved to kubex-health-latest.json)."
 
 ## Example invocations
 
