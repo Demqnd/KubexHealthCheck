@@ -51,7 +51,9 @@ To resolve the parameter to an actual connector, don't just assume — look it u
 
 ## Output style
 
-Just the table — plain text, no markdown formatting (no headers, bullets, or bold), since this is posted directly as a Teams message. No summary paragraph, no status/freshness verdict sentence, no preamble — a dev scanning it should see the table immediately. Format:
+**Your entire response is the table below and nothing else.** Don't show your work, don't narrate walking through the steps ("Working through the data...", "Status check:", "Freshness (24h window):"), don't restate the raw tool data, don't explain how you computed the outdated flag or which version is newest — none of that internal work belongs in the answer. The steps above are for you to work out silently; the response itself starts directly with the header row.
+
+Plain text, no markdown formatting (no headers, bullets, or bold), since this is posted directly as a Teams message. No summary paragraph, no status/freshness verdict sentence, no preamble — a dev scanning it should see the table immediately, first line, no lead-in. Format:
 
 ```
 Cluster | Status | Version | Containers
